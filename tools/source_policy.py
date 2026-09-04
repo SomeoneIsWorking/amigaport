@@ -14,6 +14,9 @@ MAX_LINES = 1_200
 CONFIG_OWNERS = {Path("src/config.cpp")}
 LOGGER_OWNERS = {Path("src/logging.cpp")}
 FORBIDDEN_DEPENDENCY_SOURCES = ("libretro-core.c", "libretro-glue.c", "sources/src/memory.c")
+REQUIRED_CI_RUNNERS = ("ubuntu-24.04", "windows-2025", "macos-26")
+ACTION_USE = re.compile(r"^\s*-?\s*uses:\s*[^\s@]+@([^\s]+)\s*$", re.MULTILINE)
+FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,31 @@ def analyze_build_manifest(text: str) -> list[Finding]:
     return findings
 
 
+def analyze_workflow(text: str) -> list[Finding]:
+    findings: list[Finding] = []
+    path = Path(".github/workflows/ci.yml")
+    for reference in ACTION_USE.findall(text):
+        if not FULL_COMMIT.fullmatch(reference):
+            findings.append(Finding(path, 1, f"action is not pinned to a full commit: {reference}"))
+    for runner in REQUIRED_CI_RUNNERS:
+        if runner not in text:
+            findings.append(Finding(path, 1, f"required hosted runner is missing: {runner}"))
+    if text.count("tools/verify.py") < 2:
+        findings.append(Finding(path, 1, "desktop and Android jobs must call the canonical verifier"))
+    if "submodules: recursive" not in text:
+        findings.append(Finding(path, 1, "CI must initialize the maintained CPU submodule"))
+    checkout_count = text.count("uses: actions/checkout@")
+    if text.count("fetch-depth: 0") < checkout_count:
+        findings.append(Finding(path, 1, "each repository checkout must retain full history"))
+    if text.count("persist-credentials: false") < checkout_count:
+        findings.append(Finding(path, 1, "each repository checkout must discard credentials"))
+    if "permissions:\n  contents: read" not in text:
+        findings.append(Finding(path, 1, "CI permissions must be read-only"))
+    if "continue-on-error" in text:
+        findings.append(Finding(path, 1, "CI may not hide a failed platform job"))
+    return findings
+
+
 def scan(root: Path = ROOT) -> list[Finding]:
     findings: list[Finding] = []
     for path in iter_sources(root):
@@ -90,4 +118,9 @@ def scan(root: Path = ROOT) -> list[Finding]:
             Finding(shell_path.relative_to(root), 1, "non-launcher shell automation is forbidden")
         )
     findings.extend(analyze_build_manifest((root / "CMakeLists.txt").read_text(encoding="utf-8")))
+    workflow = root / ".github" / "workflows" / "ci.yml"
+    if not workflow.is_file():
+        findings.append(Finding(workflow.relative_to(root), 1, "hosted runtime CI is missing"))
+    else:
+        findings.extend(analyze_workflow(workflow.read_text(encoding="utf-8")))
     return findings

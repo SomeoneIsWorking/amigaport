@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <string_view>
 #include <vector>
 
@@ -13,6 +12,7 @@ class VectorMemory final : public amigaport::Memory {
     explicit VectorMemory(std::size_t size);
 
     void load16(amigaport::GuestAddress address, std::uint16_t value);
+    void load32(amigaport::GuestAddress address, std::uint32_t value);
     [[nodiscard]] amigaport::MemoryRead<std::uint8_t>
     read8(amigaport::GuestAddress address) override;
     [[nodiscard]] amigaport::MemoryRead<std::uint16_t>
@@ -37,5 +37,5 @@ class RecordingLogger final : public amigaport::Logger {
     void write(amigaport::LogLevel level, std::string_view category,
                std::string_view message) noexcept override;
 
-    std::vector<std::string> messages;
+    std::size_t write_count{};
 };

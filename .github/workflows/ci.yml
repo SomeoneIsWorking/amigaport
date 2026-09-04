@@ -1,0 +1,79 @@
+name: Runtime CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86-64 / Clang
+            runner: ubuntu-24.04
+          - name: Windows x86-64 / clang-cl
+            runner: windows-2025
+          - name: macOS arm64 / AppleClang
+            runner: macos-26
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4
+        with:
+          version: "0.10.12"
+          enable-cache: false
+      - name: Verify native runtime
+        run: uv run --frozen --no-python-downloads python tools/verify.py
+
+  android:
+    name: Android API 35 runtime and arm64-v8a build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: SomeoneIsWorking/android-port
+          ref: 2dc4bcb12483aeae183387e8b46ec5b76a381de2
+          path: build/deps/android-port
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4
+        with:
+          version: "0.10.12"
+          enable-cache: false
+      - name: Verify Android runtime
+        uses: ReactiveCircus/android-emulator-runner@324029e2f414c084d8b15ba075288885e74aef9c
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+            -camera-back none
+          script: >-
+            uv run --frozen --no-python-downloads python tools/verify.py
+            --target android --android-port-dir build/deps/android-port

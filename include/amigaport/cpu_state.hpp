@@ -38,6 +38,8 @@ struct CpuState final {
     std::uint32_t supervisor_stack_pointer{};
     std::uint16_t instruction_register{};
     std::uint16_t prefetch_word{};
+    GuestAddress prefetch_address{};
+    bool prefetch_valid{};
     std::uint8_t pending_interrupt_level{};
     bool stopped{};
     bool halted{};

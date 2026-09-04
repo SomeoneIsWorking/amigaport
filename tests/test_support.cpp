@@ -1,12 +1,15 @@
 #include "test_support.hpp"
 
-#include <utility>
-
 VectorMemory::VectorMemory(std::size_t size) : bytes_(size) {}
 
 void VectorMemory::load16(amigaport::GuestAddress address, std::uint16_t value) {
     bytes_.at(address) = static_cast<std::uint8_t>(value >> 8U);
     bytes_.at(address + 1U) = static_cast<std::uint8_t>(value);
+}
+
+void VectorMemory::load32(amigaport::GuestAddress address, std::uint32_t value) {
+    load16(address, static_cast<std::uint16_t>(value >> 16U));
+    load16(address + 2U, static_cast<std::uint16_t>(value));
 }
 
 amigaport::MemoryRead<std::uint8_t> VectorMemory::read8(amigaport::GuestAddress address) {
@@ -72,7 +75,6 @@ bool VectorMemory::contains(amigaport::GuestAddress address, std::size_t width) 
     return address <= bytes_.size() && width <= bytes_.size() - address;
 }
 
-void RecordingLogger::write(amigaport::LogLevel, std::string_view category,
-                            std::string_view message) noexcept {
-    messages.emplace_back(std::string(category) + ": " + std::string(message));
+void RecordingLogger::write(amigaport::LogLevel, std::string_view, std::string_view) noexcept {
+    ++write_count;
 }

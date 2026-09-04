@@ -1,0 +1,256 @@
+"""Portable build and runtime verification shared by local and hosted gates."""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from types import ModuleType
+
+from source_policy import ROOT, iter_sources
+
+
+ANDROID_PORT_REVISION = "2dc4bcb12483aeae183387e8b46ec5b76a381de2"
+ANDROID_NDK_VERSION = "28.2.13676358"
+ANDROID_ABIS = ("x86_64", "arm64-v8a")
+
+
+@dataclass(frozen=True)
+class NativeProfile:
+    name: str
+    c_compiler: str
+    cxx_compiler: str
+    compiler_id: str
+    executable_suffix: str = ""
+
+
+def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    print(f"$ {shlex.join(command)}", flush=True)
+    return subprocess.run(
+        command,
+        cwd=ROOT,
+        check=True,
+        capture_output=capture,
+        text=True,
+    )
+
+
+def native_profile() -> NativeProfile:
+    system = platform.system()
+    machine = platform.machine().lower()
+    if system == "Linux":
+        if machine not in {"x86_64", "amd64"}:
+            raise RuntimeError(f"Linux CI currently owns x86-64, not {machine}")
+        return NativeProfile("linux-x86_64", "clang", "clang++", "Clang")
+    if system == "Darwin":
+        if machine != "arm64":
+            raise RuntimeError(f"macOS CI currently owns Apple Silicon, not {machine}")
+        return NativeProfile("macos-arm64", "clang", "clang++", "AppleClang")
+    if system == "Windows":
+        if machine not in {"x86_64", "amd64"}:
+            raise RuntimeError(f"Windows CI currently owns x86-64, not {machine}")
+        return NativeProfile("windows-x86_64", "clang-cl", "clang-cl", "Clang", ".exe")
+    raise RuntimeError(f"no maintained native verification profile for {system} {machine}")
+
+
+def first_party_native_sources() -> list[str]:
+    return [
+        str(path.relative_to(ROOT))
+        for path in iter_sources()
+        if path.suffix in {".c", ".cc", ".cpp", ".h", ".hpp"}
+    ]
+
+
+def translation_units() -> list[str]:
+    return [
+        path
+        for path in first_party_native_sources()
+        if Path(path).suffix in {".c", ".cc", ".cpp"}
+    ]
+
+
+def clang_tool(name: str) -> str:
+    located = shutil.which(name)
+    if located:
+        return located
+    if platform.system() == "Darwin":
+        brew = shutil.which("brew")
+        if brew:
+            prefix = run([brew, "--prefix", "llvm"], capture=True).stdout.strip()
+            candidate = Path(prefix) / "bin" / name
+            if candidate.is_file():
+                return str(candidate)
+    if platform.system() == "Windows" and (program_files := os.environ.get("ProgramFiles")):
+        candidate = Path(program_files) / "LLVM" / "bin" / f"{name}.exe"
+        if candidate.is_file():
+            return str(candidate)
+    raise RuntimeError(f"required LLVM tool is unavailable: {name}")
+
+
+def common_checks() -> None:
+    run([sys.executable, str(ROOT / "tools" / "policy.py")])
+    run([sys.executable, str(ROOT / "tests" / "test_source_policy.py")])
+    run([sys.executable, str(ROOT / "tests" / "test_link_audit.py")])
+    run([clang_tool("clang-format"), "--dry-run", "--Werror", *first_party_native_sources()])
+
+
+def configure(build_dir: Path, arguments: list[str]) -> None:
+    run(
+        [
+            "cmake",
+            "-S",
+            str(ROOT),
+            "-B",
+            str(build_dir),
+            "-G",
+            "Ninja",
+            "-DCMAKE_BUILD_TYPE=Debug",
+            *arguments,
+        ]
+    )
+
+
+def assert_compiler(build_dir: Path, language: str, expected: str) -> None:
+    matches = list((build_dir / "CMakeFiles").glob(f"*/CMake{language}Compiler.cmake"))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"expected one CMake {language} compiler record in {build_dir}, found {len(matches)}"
+        )
+    marker = f'set(CMAKE_{language}_COMPILER_ID "{expected}")'
+    if marker not in matches[0].read_text(encoding="utf-8"):
+        raise RuntimeError(f"{build_dir} did not configure {language} with {expected}")
+
+
+def build_and_audit(build_dir: Path, executable_suffix: str = "") -> Path:
+    run(["cmake", "--build", str(build_dir)])
+    executable = build_dir / f"amigaport_tests{executable_suffix}"
+    run([sys.executable, str(ROOT / "tools" / "link_audit.py"), str(executable)])
+    return executable
+
+
+def lint(build_dir: Path) -> None:
+    run([clang_tool("clang-tidy"), "-p", str(build_dir), *translation_units()])
+
+
+def verify_native() -> None:
+    profile = native_profile()
+    build_dir = ROOT / "build" / f"verify-{profile.name}"
+    common_checks()
+    configure(
+        build_dir,
+        [
+            f"-DCMAKE_C_COMPILER={profile.c_compiler}",
+            f"-DCMAKE_CXX_COMPILER={profile.cxx_compiler}",
+        ],
+    )
+    assert_compiler(build_dir, "C", profile.compiler_id)
+    assert_compiler(build_dir, "CXX", profile.compiler_id)
+    build_and_audit(build_dir, profile.executable_suffix)
+    run(["ctest", "--test-dir", str(build_dir), "--output-on-failure"])
+    lint(build_dir)
+
+
+def resolve_android_port(explicit: Path | None) -> Path:
+    candidates = [
+        explicit,
+        ROOT.parent / "android-port",
+        ROOT / "build" / "deps" / "android-port",
+    ]
+    tried: list[Path] = []
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        resolved = candidate.resolve()
+        tried.append(resolved)
+        if (resolved / "tools" / "android_port.py").is_file():
+            revision = run(
+                ["git", "-C", str(resolved), "rev-parse", "HEAD"], capture=True
+            ).stdout.strip()
+            if revision != ANDROID_PORT_REVISION:
+                raise RuntimeError(
+                    "shared/android-port revision mismatch: "
+                    f"expected {ANDROID_PORT_REVISION}, got {revision}"
+                )
+            return resolved
+    attempted = ", ".join(str(path) for path in tried)
+    raise RuntimeError(f"shared/android-port is required; tried: {attempted}")
+
+
+def load_android_contract(android_port: Path) -> ModuleType:
+    source = android_port / "tools" / "android_port.py"
+    spec = importlib.util.spec_from_file_location("amigaport_android_contract", source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load shared Android contract: {source}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def resolve_ndk() -> Path:
+    roots = [
+        os.environ.get("ANDROID_HOME"),
+        os.environ.get("ANDROID_SDK_ROOT"),
+    ]
+    candidates = [Path(root) / "ndk" / ANDROID_NDK_VERSION for root in roots if root]
+    for candidate in candidates:
+        if (candidate / "build" / "cmake" / "android.toolchain.cmake").is_file():
+            return candidate.resolve()
+    attempted = ", ".join(str(path) for path in candidates)
+    raise RuntimeError(f"Android NDK {ANDROID_NDK_VERSION} is required; tried: {attempted}")
+
+
+def android_build(ndk: Path, abi: str, api: int) -> tuple[Path, Path]:
+    build_dir = ROOT / "build" / f"verify-android-{abi}"
+    configure(
+        build_dir,
+        [
+            f"-DCMAKE_TOOLCHAIN_FILE={ndk / 'build/cmake/android.toolchain.cmake'}",
+            f"-DANDROID_ABI={abi}",
+            f"-DANDROID_PLATFORM=android-{api}",
+            "-DANDROID_STL=c++_static",
+        ],
+    )
+    assert_compiler(build_dir, "C", "Clang")
+    assert_compiler(build_dir, "CXX", "Clang")
+    return build_dir, build_and_audit(build_dir)
+
+
+def run_android_test(executable: Path) -> None:
+    adb = shutil.which("adb")
+    if adb is None:
+        raise RuntimeError("Android runtime verification requires adb")
+    run([adb, "get-state"])
+    abi = run([adb, "shell", "getprop", "ro.product.cpu.abi"], capture=True).stdout.strip()
+    api = run([adb, "shell", "getprop", "ro.build.version.sdk"], capture=True).stdout.strip()
+    if abi != "x86_64" or api != "35":
+        raise RuntimeError(f"Android verifier requires API 35 x86_64, got API {api} {abi}")
+    remote = "/data/local/tmp/amigaport_tests"
+    run([adb, "push", str(executable), remote])
+    run([adb, "shell", "chmod", "755", remote])
+    run([adb, "shell", remote])
+
+
+def verify_android(android_port_dir: Path | None) -> None:
+    common_checks()
+    android_port = resolve_android_port(android_port_dir)
+    contract = load_android_contract(android_port)
+    api = contract.DEFAULT_ANDROID_API
+    if api != 21:
+        raise RuntimeError(f"unexpected shared Android API floor: {api}")
+    ndk = resolve_ndk()
+    executables: dict[str, Path] = {}
+    build_directories: dict[str, Path] = {}
+    for abi in ANDROID_ABIS:
+        if abi not in contract.NDK_TRIPLES:
+            raise RuntimeError(f"shared Android contract does not support required ABI: {abi}")
+        contract.ndk_cxx_shared_library(ndk, abi)
+        build_directories[abi], executables[abi] = android_build(ndk, abi, api)
+    lint(build_directories["x86_64"])
+    run_android_test(executables["x86_64"])
