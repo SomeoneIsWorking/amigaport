@@ -14,7 +14,12 @@ MAX_LINES = 1_200
 CONFIG_OWNERS = {Path("src/config.cpp")}
 LOGGER_OWNERS = {Path("src/logging.cpp")}
 FORBIDDEN_DEPENDENCY_SOURCES = ("libretro-core.c", "libretro-glue.c", "sources/src/memory.c")
-REQUIRED_CI_RUNNERS = ("ubuntu-24.04", "windows-2025", "macos-26")
+REQUIRED_CI_RUNNERS = (
+    "ubuntu-24.04",
+    "windows-2025",
+    "macos-26",
+    "macos-15-intel",
+)
 ACTION_USE = re.compile(r"^\s*-?\s*uses:\s*[^\s@]+@([^\s]+)\s*$", re.MULTILINE)
 FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 
@@ -102,6 +107,8 @@ def analyze_workflow(text: str) -> list[Finding]:
         findings.append(Finding(path, 1, "CI permissions must be read-only"))
     if "continue-on-error" in text:
         findings.append(Finding(path, 1, "CI may not hide a failed platform job"))
+    if "--android-serial emulator-5554" not in text:
+        findings.append(Finding(path, 1, "Android runtime must select the hosted emulator by serial"))
     return findings
 
 

@@ -106,9 +106,13 @@ Gap: no hosted Apple Silicon result exists yet.
 ### S011 — Android hosted CI
 
 The Android job consumes `shared/android-port` at its pinned revision and NDK 28.2.13676358/API 21.
-It builds and audits x86-64 and arm64-v8a artifacts, then runs the synthetic runtime on an API 35
-x86-64 emulator. The first hosted result remains missing. This does not verify arm64-v8a execution;
+It builds and audits x86-64 and arm64-v8a artifacts on a macOS Intel host, then runs the synthetic
+runtime on the hardware-accelerated API 35 x86-64 emulator selected by exact ADB serial. The first
+hosted result remains missing. This does not verify arm64-v8a execution;
 that requires a matching physical or hosted ARM64 Android device. APK assembly and installation are
 inapplicable because `amigaport` is an embeddable static library rather than an application package.
+
+Evidence: the focused local gate cross-builds and link-audits both ABIs against the pinned PUAE fork,
+and controlled tests prove the device boundary accepts only the configured online emulator.
 
 Gap: the first hosted Android result and matching-device arm64-v8a execution both remain missing.
