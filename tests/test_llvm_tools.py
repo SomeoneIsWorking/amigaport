@@ -34,7 +34,7 @@ class LlvmToolTests(unittest.TestCase):
         ):
             resolved = llvm_tools.find_llvm_tool("clang-format")
 
-        self.assertEqual(resolved, "/opt/homebrew/opt/llvm@20/bin/clang-format")
+        self.assertEqual(resolved, str(Path("/opt/homebrew/opt/llvm@20/bin/clang-format")))
 
     def test_refuses_missing_tool(self) -> None:
         with (

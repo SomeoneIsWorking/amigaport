@@ -110,14 +110,16 @@ class PuaeCore::Impl final {
     static uae_m68k_memory_status write(void *user, const uae_m68k_write_request *request) {
         auto &self = *static_cast<Impl *>(user);
         if (request->width == 1U) {
-            return export_fault(
-                self.memory.write8(request->address, static_cast<std::uint8_t>(request->value)));
+            return export_fault(self.memory.write8(
+                {.address = request->address, .value = static_cast<std::uint8_t>(request->value)}));
         }
         if (request->width == 2U) {
             return export_fault(
-                self.memory.write16(request->address, static_cast<std::uint16_t>(request->value)));
+                self.memory.write16({.address = request->address,
+                                     .value = static_cast<std::uint16_t>(request->value)}));
         }
-        return export_fault(self.memory.write32(request->address, request->value));
+        return export_fault(
+            self.memory.write32({.address = request->address, .value = request->value}));
     }
 
     static void write_log(void *user, const uae_m68k_log_event *event) noexcept {

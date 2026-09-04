@@ -21,7 +21,7 @@ jobs:
             runner: ubuntu-24.04
           - name: Windows x86-64 / clang-cl
             runner: windows-2025
-          - name: macOS arm64 / AppleClang
+          - name: macOS arm64 / Clang
             runner: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -41,7 +41,7 @@ jobs:
 
   android:
     name: Android API 35 runtime and arm64-v8a build
-    runs-on: macos-15-intel
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -63,6 +63,8 @@ jobs:
         with:
           version: "0.10.12"
           enable-cache: false
+      - name: Enable Android emulator hardware acceleration
+        run: sudo chmod 0666 /dev/kvm
       - name: Verify Android runtime
         uses: ReactiveCircus/android-emulator-runner@324029e2f414c084d8b15ba075288885e74aef9c
         with:

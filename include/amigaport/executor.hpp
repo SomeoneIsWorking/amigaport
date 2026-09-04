@@ -37,7 +37,7 @@ using NativeOverride = std::function<ExecutionExit(Executor &)>;
 class Executor final {
   public:
     Executor(RuntimeConfig config, Memory &memory, Logger &logger);
-    ~Executor();
+    ~Executor() = default;
 
     Executor(const Executor &) = delete;
     Executor &operator=(const Executor &) = delete;
@@ -59,7 +59,10 @@ class Executor final {
 
   private:
     class Impl;
-    std::unique_ptr<Impl> impl_;
+    struct ImplDeleter final {
+        void operator()(Impl *implementation) const noexcept;
+    };
+    std::unique_ptr<Impl, ImplDeleter> impl_;
 };
 
 } // namespace amigaport

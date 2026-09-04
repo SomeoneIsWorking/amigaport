@@ -22,7 +22,7 @@ uv run --frozen python tools/verify.py
 ```
 
 The canonical verifier also owns the hosted Linux x86-64/Clang, Windows x86-64/clang-cl, and Apple
-Silicon macOS/AppleClang jobs. Android CI compiles both x86-64 and arm64-v8a with NDK
+Silicon macOS/Homebrew Clang jobs. Android CI compiles both x86-64 and arm64-v8a with NDK
 28.2.13676358 at API 21, audits both linked artifacts, and runs the same complete synthetic runtime
 suite on an API 35 x86-64 emulator. The Android job consumes the pinned `shared/android-port`
 contract. It does not claim arm64-v8a runtime verification from that x86-64 emulator.

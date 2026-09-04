@@ -12,6 +12,11 @@ namespace amigaport {
 
 class Executor::Impl final {
   public:
+    struct SliceProgress final {
+        std::uint32_t instructions{};
+        std::uint64_t cycles{};
+    };
+
     Impl(RuntimeConfig config_value, Memory &memory_value, Logger &logger_value)
         : config(config_value), memory(memory_value), logger(logger_value),
           core(memory_value, logger_value) {
@@ -44,15 +49,14 @@ class Executor::Impl final {
             requested_budget == 0U ? config.max_instructions_per_slice
                                    : std::min(requested_budget, config.max_instructions_per_slice);
         const ImageGeneration starting_generation = image.generation;
-        std::uint32_t executed{};
-        std::uint64_t cycles{};
+        SliceProgress progress;
 
-        while (executed < budget) {
+        while (progress.instructions < budget) {
             if (cpu.halted) {
-                return make_exit(ExitReason::Halted, executed, cycles);
+                return make_exit(ExitReason::Halted, progress);
             }
             if (image.generation != starting_generation) {
-                return make_exit(ExitReason::ImageReplaced, executed, cycles);
+                return make_exit(ExitReason::ImageReplaced, progress);
             }
 
             const ExecutionIdentity current = identity();
@@ -66,7 +70,7 @@ class Executor::Impl final {
             const detail::CoreStep step = core.step(cpu);
             if (step.status == detail::CoreStep::Status::MemoryFault) {
                 logger.write(LogLevel::Error, "cpu", "68000 memory access failed");
-                ExecutionExit result = make_exit(ExitReason::MemoryFault, executed, cycles);
+                ExecutionExit result = make_exit(ExitReason::MemoryFault, progress);
                 result.memory_fault = step.memory_fault;
                 cpu.exception = {.active_vector = step.memory_fault == MemoryFault::Misaligned
                                                       ? ExceptionVector::AddressError
@@ -77,36 +81,36 @@ class Executor::Impl final {
             }
             if (step.status == detail::CoreStep::Status::Exception) {
                 if (step.instruction_executed) {
-                    ++executed;
+                    ++progress.instructions;
                     ++cpu.executed_instructions;
                 }
-                cycles += step.cycles;
+                progress.cycles += step.cycles;
                 cpu.elapsed_cycles += step.cycles;
                 cpu.exception = {.active_vector = step.exception_vector,
                                  .instruction_word = step.instruction_word};
-                ExecutionExit result = make_exit(ExitReason::Exception, executed, cycles);
+                ExecutionExit result = make_exit(ExitReason::Exception, progress);
                 result.instruction_word = step.instruction_word;
                 return result;
             }
             if (step.status == detail::CoreStep::Status::Halted) {
-                return make_exit(ExitReason::Halted, executed, cycles);
+                return make_exit(ExitReason::Halted, progress);
             }
 
-            ++executed;
-            cycles += step.cycles;
+            ++progress.instructions;
+            progress.cycles += step.cycles;
             ++cpu.executed_instructions;
             cpu.elapsed_cycles += step.cycles;
         }
 
-        return make_exit(ExitReason::InstructionBudget, executed, cycles);
+        return make_exit(ExitReason::InstructionBudget, progress);
     }
 
-    [[nodiscard]] ExecutionExit make_exit(ExitReason reason, std::uint32_t instructions,
-                                          std::uint64_t cycles) const noexcept {
+    [[nodiscard]] ExecutionExit make_exit(ExitReason reason,
+                                          SliceProgress progress) const noexcept {
         return {.reason = reason,
                 .identity = identity(),
-                .instructions = instructions,
-                .cycles = cycles};
+                .instructions = progress.instructions,
+                .cycles = progress.cycles};
     }
 
     [[nodiscard]] Executor &owner() {
@@ -128,11 +132,13 @@ class Executor::Impl final {
 };
 
 Executor::Executor(RuntimeConfig config, Memory &memory, Logger &logger)
-    : impl_(std::make_unique<Impl>(config, memory, logger)) {
+    : impl_(new Impl(config, memory, logger)) {
     impl_->owner_pointer = this;
 }
 
-Executor::~Executor() = default;
+void Executor::ImplDeleter::operator()(Impl *implementation) const noexcept {
+    delete implementation;
+}
 
 CpuState &Executor::state() noexcept { return impl_->cpu; }
 const CpuState &Executor::state() const noexcept { return impl_->cpu; }
@@ -157,7 +163,7 @@ void Executor::remove_override(ExecutionIdentity identity) { impl_->overrides.re
 
 ExecutionExit Executor::execute(InstructionBudget instruction_budget) {
     if (impl_->image.tag.value == 0U) {
-        return impl_->make_exit(ExitReason::NoImage, 0, 0);
+        return impl_->make_exit(ExitReason::NoImage, {});
     }
     if (!cpu_state_is_valid(impl_->cpu)) {
         throw std::invalid_argument("CPU state is not a valid 68000 architectural state");
