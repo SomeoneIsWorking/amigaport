@@ -19,7 +19,8 @@ def _homebrew() -> str | None:
     return None
 
 
-def _homebrew_llvm_tool(name: str) -> str | None:
+def find_homebrew_llvm_tool(name: str) -> str | None:
+    """Find a tool in the maintained Homebrew LLVM installation."""
     brew = _homebrew()
     if brew is None:
         return None
@@ -42,7 +43,7 @@ def find_llvm_tool(name: str) -> str:
     """Find a named LLVM tool without changing the selected compiler."""
     if located := shutil.which(name):
         return located
-    if platform.system() == "Darwin" and (located := _homebrew_llvm_tool(name)):
+    if platform.system() == "Darwin" and (located := find_homebrew_llvm_tool(name)):
         return located
     if platform.system() == "Windows" and (program_files := os.environ.get("ProgramFiles")):
         candidate = Path(program_files) / "LLVM" / "bin" / f"{name}.exe"

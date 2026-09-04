@@ -97,18 +97,19 @@ Gap: no hosted result exists yet, so Windows runtime support is not claimed.
 
 ### S010 — Apple Silicon macOS hosted CI
 
-The pinned workflow selects GitHub's macOS 26 arm64 runner and AppleClang, then runs the complete
-synthetic verifier and Mach-O-aware linked-symbol audit. No hosted result exists yet. Intel macOS is
-not a current project target; the project goal specifically names Apple Silicon.
+The pinned workflow selects GitHub's macOS 26 arm64 runner and its maintained Homebrew LLVM
+toolchain, then runs the complete synthetic verifier and Mach-O-aware linked-symbol audit with one
+matching compiler/linter resource tree. Intel macOS is not a current product target.
 
 Gap: no hosted Apple Silicon result exists yet.
 
 ### S011 — Android hosted CI
 
 The Android job consumes `shared/android-port` at its pinned revision and NDK 28.2.13676358/API 21.
-It builds and audits x86-64 and arm64-v8a artifacts on a macOS Intel host, then runs the synthetic
-runtime on the hardware-accelerated API 35 x86-64 emulator selected by exact ADB serial. The first
-hosted result remains missing. This does not verify arm64-v8a execution;
+It builds and audits x86-64 and arm64-v8a artifacts on Ubuntu, explicitly grants the ephemeral
+runner access to its KVM device, then runs the synthetic runtime on the hardware-accelerated API 35
+x86-64 emulator selected by exact ADB serial. The first hosted result remains missing. This does not
+verify arm64-v8a execution;
 that requires a matching physical or hosted ARM64 Android device. APK assembly and installation are
 inapplicable because `amigaport` is an embeddable static library rather than an application package.
 

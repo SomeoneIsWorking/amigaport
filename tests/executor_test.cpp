@@ -51,16 +51,16 @@ uae_m68k_memory_status raw_write(void *, const uae_m68k_write_request *) {
     return UAE_M68K_MEMORY_READ_ONLY;
 }
 
-void raw_load16(RawMemory &memory, std::uint32_t address, std::uint16_t value) {
-    memory.bytes.at(address) = static_cast<std::uint8_t>(value >> 8U);
-    memory.bytes.at(address + 1U) = static_cast<std::uint8_t>(value);
+void raw_load16(RawMemory &memory, amigaport::MemoryWrite<std::uint16_t> write) {
+    memory.bytes.at(write.address) = static_cast<std::uint8_t>(write.value >> 8U);
+    memory.bytes.at(write.address + 1U) = static_cast<std::uint8_t>(write.value);
 }
 
 void test_upstream_moveq_and_budget_exit() {
     VectorMemory memory(16);
     RecordingLogger logger;
-    memory.load16(0, 0x76FF); // MOVEQ #-1,D3
-    memory.load16(2, 0x4E71); // NOP
+    memory.load16({.address = 0, .value = 0x76FF}); // MOVEQ #-1,D3
+    memory.load16({.address = 2, .value = 0x4E71}); // NOP
 
     amigaport::Executor executor({.max_instructions_per_slice = 8}, memory, logger);
     for (std::size_t index = 0; index < 8; ++index) {
@@ -93,7 +93,7 @@ void test_upstream_moveq_and_budget_exit() {
 void test_image_qualified_override_and_original_call() {
     VectorMemory memory(16);
     RecordingLogger logger;
-    memory.load16(0, 0x7007); // MOVEQ #7,D0
+    memory.load16({.address = 0, .value = 0x7007}); // MOVEQ #7,D0
 
     amigaport::Executor executor({.max_instructions_per_slice = 4}, memory, logger);
     executor.state().sr = 0x2000;
@@ -135,12 +135,12 @@ void test_image_qualified_override_and_original_call() {
 void test_memory_branch_and_prefetch_paths() {
     VectorMemory memory(128);
     RecordingLogger logger;
-    memory.load16(0, 0x30BC); // MOVE.W #$1234,(A0)
-    memory.load16(2, 0x1234);
-    memory.load16(4, 0x6002); // BRA.s to 8
-    memory.load16(6, 0x7001); // skipped
-    memory.load16(8, 0x7002); // MOVEQ #2,D0
-    memory.load16(10, 0x4E71);
+    memory.load16({.address = 0, .value = 0x30BC}); // MOVE.W #$1234,(A0)
+    memory.load16({.address = 2, .value = 0x1234});
+    memory.load16({.address = 4, .value = 0x6002}); // BRA.s to 8
+    memory.load16({.address = 6, .value = 0x7001}); // skipped
+    memory.load16({.address = 8, .value = 0x7002}); // MOVEQ #2,D0
+    memory.load16({.address = 10, .value = 0x4E71});
 
     amigaport::Executor executor({.max_instructions_per_slice = 8}, memory, logger);
     executor.state().sr = 0x2700;
@@ -164,11 +164,11 @@ void test_interrupt_entry_is_not_an_executed_instruction() {
     RecordingLogger logger;
     constexpr std::uint8_t interrupt_level = 3;
     constexpr std::uint8_t vector = 24 + interrupt_level;
-    memory.load16(0, 0x4E71);
-    memory.load16(2, 0x4E71);
-    memory.load32(static_cast<amigaport::GuestAddress>(vector) * 4U, 0xC0U);
-    memory.load16(0xC0, 0x4E71);
-    memory.load16(0xC2, 0x4E71);
+    memory.load16({.address = 0, .value = 0x4E71});
+    memory.load16({.address = 2, .value = 0x4E71});
+    memory.load32({.address = static_cast<amigaport::GuestAddress>(vector) * 4U, .value = 0xC0U});
+    memory.load16({.address = 0xC0, .value = 0x4E71});
+    memory.load16({.address = 0xC2, .value = 0x4E71});
 
     amigaport::Executor executor({.max_instructions_per_slice = 8}, memory, logger);
     executor.state().sr = 0x2000;
@@ -191,10 +191,10 @@ void test_interrupt_entry_is_not_an_executed_instruction() {
 void test_precise_unsupported_and_memory_fault_exits() {
     VectorMemory memory(256);
     RecordingLogger logger;
-    memory.load16(0, 0x4AFC); // ILLEGAL
-    memory.load32(4U * 4U, 0x80U);
-    memory.load16(0x80, 0x4E71);
-    memory.load16(0x82, 0x4E71);
+    memory.load16({.address = 0, .value = 0x4AFC}); // ILLEGAL
+    memory.load32({.address = 4U * 4U, .value = 0x80U});
+    memory.load16({.address = 0x80, .value = 0x4E71});
+    memory.load16({.address = 0x82, .value = 0x4E71});
 
     amigaport::Executor executor({.max_instructions_per_slice = 4}, memory, logger);
     executor.state().sr = 0x2000;
@@ -250,12 +250,12 @@ void test_complete_68000_dispatch_population() {
 void test_nested_context_execution_is_isolated() {
     RawMemory inner_memory;
     RawMemory outer_memory;
-    raw_load16(inner_memory, 0, 0x7007);
-    raw_load16(inner_memory, 2, 0x4E71);
-    raw_load16(inner_memory, 4, 0x4E71);
-    raw_load16(outer_memory, 0, 0x7003);
-    raw_load16(outer_memory, 2, 0x4E71);
-    raw_load16(outer_memory, 4, 0x4E71);
+    raw_load16(inner_memory, {.address = 0, .value = 0x7007});
+    raw_load16(inner_memory, {.address = 2, .value = 0x4E71});
+    raw_load16(inner_memory, {.address = 4, .value = 0x4E71});
+    raw_load16(outer_memory, {.address = 0, .value = 0x7003});
+    raw_load16(outer_memory, {.address = 2, .value = 0x4E71});
+    raw_load16(outer_memory, {.address = 4, .value = 0x4E71});
     const uae_m68k_memory callbacks{.read = &raw_read,
                                     .write = &raw_write,
                                     .acknowledge_interrupt = nullptr,

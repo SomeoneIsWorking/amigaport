@@ -12,8 +12,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
-from llvm_tools import find_llvm_tool
+from llvm_tools import find_homebrew_llvm_tool, find_llvm_tool
 from source_policy import ROOT, iter_sources
 
 
@@ -29,6 +30,8 @@ class NativeProfile:
     cxx_compiler: str
     compiler_id: str
     executable_suffix: str = ""
+    formatter: str = "clang-format"
+    linter: str = "clang-tidy"
 
 
 def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
@@ -52,7 +55,28 @@ def native_profile() -> NativeProfile:
     if system == "Darwin":
         if machine != "arm64":
             raise RuntimeError(f"macOS CI currently owns Apple Silicon, not {machine}")
-        return NativeProfile("macos-arm64", "clang", "clang++", "AppleClang")
+        discovered = {
+            name: find_homebrew_llvm_tool(name)
+            for name in ("clang", "clang++", "clang-format", "clang-tidy")
+        }
+        missing = [name for name, path in discovered.items() if path is None]
+        if missing:
+            raise RuntimeError("Homebrew LLVM toolchain is incomplete: " + ", ".join(missing))
+        tools = {name: cast(str, path) for name, path in discovered.items()}
+        tool_roots = {Path(path).parent for path in tools.values()}
+        if len(tool_roots) != 1:
+            raise RuntimeError(
+                "Homebrew LLVM compiler and verification tools do not share one toolchain: "
+                + ", ".join(sorted(str(root) for root in tool_roots))
+            )
+        return NativeProfile(
+            "macos-arm64-clang",
+            tools["clang"],
+            tools["clang++"],
+            "Clang",
+            formatter=tools["clang-format"],
+            linter=tools["clang-tidy"],
+        )
     if system == "Windows":
         if machine not in {"x86_64", "amd64"}:
             raise RuntimeError(f"Windows CI currently owns x86-64, not {machine}")
@@ -76,14 +100,21 @@ def translation_units() -> list[str]:
     ]
 
 
-def common_checks() -> None:
+def common_checks(formatter: str | None = None) -> None:
     run([sys.executable, str(ROOT / "tools" / "policy.py")])
     run([sys.executable, str(ROOT / "tests" / "test_dependency_pins.py")])
     run([sys.executable, str(ROOT / "tests" / "test_source_policy.py")])
     run([sys.executable, str(ROOT / "tests" / "test_link_audit.py")])
     run([sys.executable, str(ROOT / "tests" / "test_llvm_tools.py")])
     run([sys.executable, str(ROOT / "tests" / "test_verification.py")])
-    run([find_llvm_tool("clang-format"), "--dry-run", "--Werror", *first_party_native_sources()])
+    run(
+        [
+            formatter or find_llvm_tool("clang-format"),
+            "--dry-run",
+            "--Werror",
+            *first_party_native_sources(),
+        ]
+    )
 
 
 def configure(build_dir: Path, arguments: list[str]) -> None:
@@ -120,14 +151,14 @@ def build_and_audit(build_dir: Path, executable_suffix: str = "") -> Path:
     return executable
 
 
-def lint(build_dir: Path) -> None:
-    run([find_llvm_tool("clang-tidy"), "-p", str(build_dir), *translation_units()])
+def lint(build_dir: Path, linter: str | None = None) -> None:
+    run([linter or find_llvm_tool("clang-tidy"), "-p", str(build_dir), *translation_units()])
 
 
 def verify_native() -> None:
     profile = native_profile()
     build_dir = ROOT / "build" / f"verify-{profile.name}"
-    common_checks()
+    common_checks(profile.formatter)
     configure(
         build_dir,
         [
@@ -139,7 +170,7 @@ def verify_native() -> None:
     assert_compiler(build_dir, "CXX", profile.compiler_id)
     build_and_audit(build_dir, profile.executable_suffix)
     run(["ctest", "--test-dir", str(build_dir), "--output-on-failure"])
-    lint(build_dir)
+    lint(build_dir, profile.linter)
 
 
 def resolve_android_port(explicit: Path | None) -> Path:
