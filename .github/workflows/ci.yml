@@ -41,7 +41,7 @@ jobs:
 
   android:
     name: Android API 35 runtime and arm64-v8a build
-    runs-on: ubuntu-24.04
+    runs-on: macos-15-intel
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: SomeoneIsWorking/android-port
-          ref: 2dc4bcb12483aeae183387e8b46ec5b76a381de2
+          ref: 3079116e84ea4f581ae4bc42e8219df52ece16d7
           path: build/deps/android-port
           fetch-depth: 0
           persist-credentials: false
@@ -77,3 +77,4 @@ jobs:
           script: >-
             uv run --frozen --no-python-downloads python tools/verify.py
             --target android --android-port-dir build/deps/android-port
+            --android-serial emulator-5554

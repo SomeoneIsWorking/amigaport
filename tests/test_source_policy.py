@@ -61,8 +61,9 @@ jobs:
   macos:
     runs-on: macos-26
   android:
+    runs-on: macos-15-intel
     steps:
-      - run: python tools/verify.py --target android
+      - run: python tools/verify.py --target android --android-serial emulator-5554
 submodules: recursive
 fetch-depth: 0
 fetch-depth: 0
@@ -76,6 +77,7 @@ persist-credentials: false
         messages = [finding.message for finding in findings]
         self.assertIn("action is not pinned to a full commit: v4", messages)
         self.assertIn("required hosted runner is missing: macos-26", messages)
+        self.assertIn("Android runtime must select the hosted emulator by serial", messages)
         self.assertIn("CI may not hide a failed platform job", messages)
 
 

@@ -13,9 +13,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--target", choices=("native", "android"), default="native")
     parser.add_argument("--android-port-dir", type=Path)
+    parser.add_argument("--android-serial", default="emulator-5554")
     arguments = parser.parse_args()
     if arguments.target == "android":
-        verify_android(arguments.android_port_dir)
+        verify_android(arguments.android_port_dir, arguments.android_serial)
     else:
         verify_native()
     return 0

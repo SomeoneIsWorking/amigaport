@@ -13,10 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+from llvm_tools import find_llvm_tool
 from source_policy import ROOT, iter_sources
 
 
-ANDROID_PORT_REVISION = "2dc4bcb12483aeae183387e8b46ec5b76a381de2"
+ANDROID_PORT_REVISION = "3079116e84ea4f581ae4bc42e8219df52ece16d7"
 ANDROID_NDK_VERSION = "28.2.13676358"
 ANDROID_ABIS = ("x86_64", "arm64-v8a")
 
@@ -75,29 +76,14 @@ def translation_units() -> list[str]:
     ]
 
 
-def clang_tool(name: str) -> str:
-    located = shutil.which(name)
-    if located:
-        return located
-    if platform.system() == "Darwin":
-        brew = shutil.which("brew")
-        if brew:
-            prefix = run([brew, "--prefix", "llvm"], capture=True).stdout.strip()
-            candidate = Path(prefix) / "bin" / name
-            if candidate.is_file():
-                return str(candidate)
-    if platform.system() == "Windows" and (program_files := os.environ.get("ProgramFiles")):
-        candidate = Path(program_files) / "LLVM" / "bin" / f"{name}.exe"
-        if candidate.is_file():
-            return str(candidate)
-    raise RuntimeError(f"required LLVM tool is unavailable: {name}")
-
-
 def common_checks() -> None:
     run([sys.executable, str(ROOT / "tools" / "policy.py")])
+    run([sys.executable, str(ROOT / "tests" / "test_dependency_pins.py")])
     run([sys.executable, str(ROOT / "tests" / "test_source_policy.py")])
     run([sys.executable, str(ROOT / "tests" / "test_link_audit.py")])
-    run([clang_tool("clang-format"), "--dry-run", "--Werror", *first_party_native_sources()])
+    run([sys.executable, str(ROOT / "tests" / "test_llvm_tools.py")])
+    run([sys.executable, str(ROOT / "tests" / "test_verification.py")])
+    run([find_llvm_tool("clang-format"), "--dry-run", "--Werror", *first_party_native_sources()])
 
 
 def configure(build_dir: Path, arguments: list[str]) -> None:
@@ -135,7 +121,7 @@ def build_and_audit(build_dir: Path, executable_suffix: str = "") -> Path:
 
 
 def lint(build_dir: Path) -> None:
-    run([clang_tool("clang-tidy"), "-p", str(build_dir), *translation_units()])
+    run([find_llvm_tool("clang-tidy"), "-p", str(build_dir), *translation_units()])
 
 
 def verify_native() -> None:
@@ -222,22 +208,32 @@ def android_build(ndk: Path, abi: str, api: int) -> tuple[Path, Path]:
     return build_dir, build_and_audit(build_dir)
 
 
-def run_android_test(executable: Path) -> None:
+def select_android_device(contract: ModuleType, adb: str, serial: str) -> list[str]:
+    """Return the exact online device command prefix or refuse ambiguous state."""
+    devices = contract.adb_devices(adb)
+    if devices != (serial,):
+        visible = ", ".join(devices) if devices else "none"
+        raise RuntimeError(f"Android verifier requires exactly {serial}; online devices: {visible}")
+    return [adb, "-s", serial]
+
+
+def run_android_test(contract: ModuleType, executable: Path, serial: str) -> None:
     adb = shutil.which("adb")
     if adb is None:
         raise RuntimeError("Android runtime verification requires adb")
-    run([adb, "get-state"])
-    abi = run([adb, "shell", "getprop", "ro.product.cpu.abi"], capture=True).stdout.strip()
-    api = run([adb, "shell", "getprop", "ro.build.version.sdk"], capture=True).stdout.strip()
+    device = select_android_device(contract, adb, serial)
+    run([*device, "get-state"])
+    abi = run([*device, "shell", "getprop", "ro.product.cpu.abi"], capture=True).stdout.strip()
+    api = run([*device, "shell", "getprop", "ro.build.version.sdk"], capture=True).stdout.strip()
     if abi != "x86_64" or api != "35":
         raise RuntimeError(f"Android verifier requires API 35 x86_64, got API {api} {abi}")
     remote = "/data/local/tmp/amigaport_tests"
-    run([adb, "push", str(executable), remote])
-    run([adb, "shell", "chmod", "755", remote])
-    run([adb, "shell", remote])
+    run([*device, "push", str(executable), remote])
+    run([*device, "shell", "chmod", "755", remote])
+    run([*device, "shell", remote])
 
 
-def verify_android(android_port_dir: Path | None) -> None:
+def verify_android(android_port_dir: Path | None, serial: str) -> None:
     common_checks()
     android_port = resolve_android_port(android_port_dir)
     contract = load_android_contract(android_port)
@@ -253,4 +249,4 @@ def verify_android(android_port_dir: Path | None) -> None:
         contract.ndk_cxx_shared_library(ndk, abi)
         build_directories[abi], executables[abi] = android_build(ndk, abi, api)
     lint(build_directories["x86_64"])
-    run_android_test(executables["x86_64"])
+    run_android_test(contract, executables["x86_64"], serial)

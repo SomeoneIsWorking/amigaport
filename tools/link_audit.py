@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import argparse
-import os
 import platform
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from llvm_tools import find_llvm_tool
 
 
 CPU_HANDLER = re.compile(r"^op_[0-9a-f]{4}_12_ff$")
@@ -41,20 +42,10 @@ def normalize_symbol(symbol: str) -> str:
 
 
 def find_symbol_tool() -> str:
-    llvm_nm = shutil.which("llvm-nm")
-    if llvm_nm:
-        return llvm_nm
-    if platform.system() == "Darwin" and (brew := shutil.which("brew")):
-        completed = subprocess.run(
-            [brew, "--prefix", "llvm"], check=True, capture_output=True, text=True
-        )
-        candidate = Path(completed.stdout.strip()) / "bin" / "llvm-nm"
-        if candidate.is_file():
-            return str(candidate)
-    if platform.system() == "Windows" and (program_files := os.environ.get("ProgramFiles")):
-        candidate = Path(program_files) / "LLVM" / "bin" / "llvm-nm.exe"
-        if candidate.is_file():
-            return str(candidate)
+    try:
+        return find_llvm_tool("llvm-nm")
+    except RuntimeError:
+        pass
     nm = shutil.which("nm")
     if nm:
         return nm

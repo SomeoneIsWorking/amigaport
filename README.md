@@ -34,6 +34,6 @@ repository produces an embeddable static library, not an Android application pac
 ## Dependency and license
 
 The pinned CPU source is `SomeoneIsWorking/libretro-uae` revision
-`9dc2617262e732df2a687f5e812f14a381d8ceb1`, licensed under GPL-2.0. Linking its CPU handlers makes
+`87998f6c2c4f28609154ecade361c2e89f08fce1`, licensed under GPL-2.0. Linking its CPU handlers makes
 the distributed combined work subject to GPL-2.0. The dependency's libretro frontend and Amiga
 device emulator are not linked into the runtime library.
