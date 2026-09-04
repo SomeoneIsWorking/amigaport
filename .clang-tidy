@@ -1,0 +1,11 @@
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  modernize-use-nullptr,
+  performance-*,
+  readability-avoid-const-params-in-decls,
+  readability-qualified-auto
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^(include|src|tests)/'
+FormatStyle: file
