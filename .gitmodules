@@ -1,4 +1,4 @@
 [submodule "third_party/libretro-uae"]
 	path = third_party/libretro-uae
 	url = https://github.com/SomeoneIsWorking/libretro-uae.git
-	branch = harness
+	branch = main

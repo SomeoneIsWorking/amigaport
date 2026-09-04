@@ -1,56 +1,23 @@
 #!/usr/bin/env python3
-"""Focused local verifier for amigaport."""
+"""Canonical local and hosted verifier for amigaport."""
 
 from __future__ import annotations
 
-import subprocess
-import sys
+import argparse
 from pathlib import Path
 
-from source_policy import ROOT, iter_sources
-
-
-BUILD_DIR = ROOT / "build" / "verify"
-
-
-def run(*command: str) -> None:
-    subprocess.run(command, cwd=ROOT, check=True)
+from verification import verify_android, verify_native
 
 
 def main() -> int:
-    run(sys.executable, str(ROOT / "tools" / "policy.py"))
-    run(sys.executable, str(ROOT / "tests" / "test_source_policy.py"))
-    run(sys.executable, str(ROOT / "tests" / "test_link_audit.py"))
-    native_sources = [
-        str(path.relative_to(ROOT))
-        for path in iter_sources()
-        if path.suffix in {".c", ".cc", ".cpp", ".h", ".hpp"}
-    ]
-    run("clang-format", "--dry-run", "--Werror", *native_sources)
-    run(
-        "cmake",
-        "-S",
-        str(ROOT),
-        "-B",
-        str(BUILD_DIR),
-        "-G",
-        "Ninja",
-        "-DCMAKE_C_COMPILER=clang",
-        "-DCMAKE_CXX_COMPILER=clang++",
-    )
-    run("cmake", "--build", str(BUILD_DIR))
-    run("ctest", "--test-dir", str(BUILD_DIR), "--output-on-failure")
-    run(
-        sys.executable,
-        str(ROOT / "tools" / "link_audit.py"),
-        str(BUILD_DIR / "amigaport_tests"),
-    )
-    translation_units = [
-        path
-        for path in native_sources
-        if Path(path).suffix in {".c", ".cc", ".cpp"}
-    ]
-    run("clang-tidy", "-p", str(BUILD_DIR), *translation_units)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--target", choices=("native", "android"), default="native")
+    parser.add_argument("--android-port-dir", type=Path)
+    arguments = parser.parse_args()
+    if arguments.target == "android":
+        verify_android(arguments.android_port_dir)
+    else:
+        verify_native()
     return 0
 
 

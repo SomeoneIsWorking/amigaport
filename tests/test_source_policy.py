@@ -10,7 +10,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
-from source_policy import MAX_LINES, analyze_build_manifest, analyze_source  # noqa: E402
+from source_policy import (  # noqa: E402
+    MAX_LINES,
+    analyze_build_manifest,
+    analyze_source,
+    analyze_workflow,
+)
 
 
 class SourcePolicyTests(unittest.TestCase):
@@ -40,6 +45,38 @@ class SourcePolicyTests(unittest.TestCase):
         findings = analyze_build_manifest("add_library(bad libretro/libretro-core.c)\n")
         self.assertEqual(len(findings), 1)
         self.assertIn("frontend/device", findings[0].message)
+
+    def test_accepts_pinned_complete_workflow_shape(self) -> None:
+        commit = "a" * 40
+        workflow = f"""permissions:
+  contents: read
+jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@{commit}
+      - run: python tools/verify.py
+  windows:
+    runs-on: windows-2025
+  macos:
+    runs-on: macos-26
+  android:
+    steps:
+      - run: python tools/verify.py --target android
+submodules: recursive
+fetch-depth: 0
+fetch-depth: 0
+persist-credentials: false
+persist-credentials: false
+"""
+        self.assertEqual(analyze_workflow(workflow), [])
+
+    def test_rejects_mutable_action_and_incomplete_matrix(self) -> None:
+        findings = analyze_workflow("- uses: actions/checkout@v4\ncontinue-on-error: true\n")
+        messages = [finding.message for finding in findings]
+        self.assertIn("action is not pinned to a full commit: v4", messages)
+        self.assertIn("required hosted runner is missing: macos-26", messages)
+        self.assertIn("CI may not hide a failed platform job", messages)
 
 
 if __name__ == "__main__":

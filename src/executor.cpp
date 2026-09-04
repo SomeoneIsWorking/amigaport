@@ -13,7 +13,8 @@ namespace amigaport {
 class Executor::Impl final {
   public:
     Impl(RuntimeConfig config_value, Memory &memory_value, Logger &logger_value)
-        : config(config_value), memory(memory_value), logger(logger_value) {
+        : config(config_value), memory(memory_value), logger(logger_value),
+          core(memory_value, logger_value) {
         if (config.max_instructions_per_slice == 0U) {
             throw std::invalid_argument("max_instructions_per_slice must be nonzero");
         }
@@ -47,7 +48,7 @@ class Executor::Impl final {
         std::uint64_t cycles{};
 
         while (executed < budget) {
-            if (cpu.halted || cpu.stopped) {
+            if (cpu.halted) {
                 return make_exit(ExitReason::Halted, executed, cycles);
             }
             if (image.generation != starting_generation) {
@@ -62,29 +63,33 @@ class Executor::Impl final {
                 return result;
             }
 
-            const auto fetch = memory.read16(cpu.pc);
-            if (!fetch) {
-                logger.write(LogLevel::Error, "cpu", "instruction fetch failed");
+            const detail::CoreStep step = core.step(cpu);
+            if (step.status == detail::CoreStep::Status::MemoryFault) {
+                logger.write(LogLevel::Error, "cpu", "68000 memory access failed");
                 ExecutionExit result = make_exit(ExitReason::MemoryFault, executed, cycles);
-                result.memory_fault = fetch.fault;
-                cpu.exception = {.active_vector = fetch.fault == MemoryFault::Misaligned
+                result.memory_fault = step.memory_fault;
+                cpu.exception = {.active_vector = step.memory_fault == MemoryFault::Misaligned
                                                       ? ExceptionVector::AddressError
                                                       : ExceptionVector::BusError,
-                                 .fault_address = cpu.pc};
+                                 .fault_address = step.fault_address,
+                                 .instruction_word = step.instruction_word};
                 return result;
             }
-
-            cpu.instruction_register = fetch.value;
-            const detail::CoreStep step = core.step(cpu, fetch.value);
-            if (!step.supported) {
-                logger.write(LogLevel::Error, "cpu", "unsupported 68000 instruction");
-                ExecutionExit result =
-                    make_exit(ExitReason::UnsupportedInstruction, executed, cycles);
-                result.instruction_word = fetch.value;
-                cpu.exception = {.active_vector = ExceptionVector::IllegalInstruction,
-                                 .fault_address = cpu.pc,
-                                 .instruction_word = fetch.value};
+            if (step.status == detail::CoreStep::Status::Exception) {
+                if (step.instruction_executed) {
+                    ++executed;
+                    ++cpu.executed_instructions;
+                }
+                cycles += step.cycles;
+                cpu.elapsed_cycles += step.cycles;
+                cpu.exception = {.active_vector = step.exception_vector,
+                                 .instruction_word = step.instruction_word};
+                ExecutionExit result = make_exit(ExitReason::Exception, executed, cycles);
+                result.instruction_word = step.instruction_word;
                 return result;
+            }
+            if (step.status == detail::CoreStep::Status::Halted) {
+                return make_exit(ExitReason::Halted, executed, cycles);
             }
 
             ++executed;
@@ -162,6 +167,7 @@ ExecutionExit Executor::execute(InstructionBudget instruction_budget) {
 
 ExecutionExit Executor::call(GuestAddress address, InstructionBudget instruction_budget) {
     impl_->cpu.pc = address;
+    impl_->cpu.prefetch_valid = false;
     return execute(instruction_budget);
 }
 
