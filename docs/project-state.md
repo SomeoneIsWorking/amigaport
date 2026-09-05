@@ -109,7 +109,13 @@ redistributable `llvm-symbolizer/pdb/Inputs/test.exe` and matching `test.pdb`: 1
 including its three known function probes. This non-CPU fixture correctly fails the CPU-table gate;
 controlled identity, record, and forbidden-owner mutations exercise refusals.
 
-Gap: hosted Windows audit, synthetic execution, and lint verification remain pending.
+Hosted run `33961343783` at revision `47623c6` passed the final PE/PDB audit with 2,867 definitions,
+all 1,540 handlers, and zero forbidden symbols, then passed all five runtime/profile tests. Its
+remaining failure was the test executable's potentially throwing iostream reporting outside its
+exception boundary. Terminal test reports now use nonthrowing stdio, success output errors fail the
+test, and controlled standard/unknown exceptions must produce ordinary failure exits.
+
+Gap: hosted Windows lint verification and the new terminal-failure regressions remain pending.
 
 ### S010 — Apple Silicon macOS hosted CI
 

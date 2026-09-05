@@ -3,8 +3,8 @@
 
 #include <cstddef>
 #include <array>
+#include <cstdio>
 #include <cstdlib>
-#include <iostream>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
@@ -282,8 +282,19 @@ void test_nested_context_execution_is_isolated() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
     try {
+        // These controlled failures exercise this executable's terminal error
+        // boundary. CTest requires failure exits, not abnormal termination.
+        if (argc == 2 && std::string_view(argv[1]) == "--exercise-standard-failure") {
+            throw std::runtime_error("controlled standard exception");
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--exercise-unknown-failure") {
+            throw main_image;
+        }
+        if (argc != 1) {
+            throw std::invalid_argument("unrecognized test arguments");
+        }
         test_upstream_moveq_and_budget_exit();
         test_image_qualified_override_and_original_call();
         test_memory_branch_and_prefetch_paths();
@@ -292,10 +303,17 @@ int main() {
         test_complete_68000_dispatch_population();
         test_nested_context_execution_is_isolated();
     } catch (const std::exception &error) {
-        std::cerr << "amigaport_tests: " << error.what() << '\n';
+        // Terminal test diagnostics must not throw while handling a failure.
+        std::fputs("amigaport_tests: ", stderr);
+        std::fputs(error.what(), stderr);
+        std::fputc('\n', stderr);
+        return EXIT_FAILURE;
+    } catch (...) {
+        std::fputs("amigaport_tests: unknown exception\n", stderr);
         return EXIT_FAILURE;
     }
 
-    std::cout << "amigaport_tests: 7 scenarios passed\n";
-    return EXIT_SUCCESS;
+    return std::puts("amigaport_tests: 7 scenarios passed") == EOF || std::fflush(stdout) == EOF
+               ? EXIT_FAILURE
+               : EXIT_SUCCESS;
 }
