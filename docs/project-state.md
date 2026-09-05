@@ -22,7 +22,7 @@ S001 is the current focus.
 | S006 | Representative gameplay is conformant and performant on Apple Silicon macOS | missing | S001 | G001 |
 | S007 | Representative gameplay is conformant and performant on Android arm64-v8a | missing | S001 | G001 |
 | S008 | Asset-free Linux x86-64 hosted CI builds, lints, audits, and runs the synthetic runtime | verified | S001 | G001 |
-| S009 | Asset-free Windows x86-64 hosted CI builds, lints, audits, and runs the synthetic runtime | partial | S001 | G001 |
+| S009 | Asset-free Windows x86-64 hosted CI builds, lints, audits, and runs the synthetic runtime | verified | S001 | G001 |
 | S010 | Asset-free Apple Silicon macOS hosted CI builds, lints, audits, and runs the synthetic runtime | verified | S001 | G001 |
 | S011 | Asset-free Android CI builds x86-64 and arm64-v8a and runs the synthetic runtime on a matching emulator ABI | partial | S001 | G001 |
 
@@ -82,7 +82,7 @@ no host evidence exists.
 
 ### S008 — Linux x86-64 hosted CI
 
-The pinned workflow calls the canonical Python verifier on Ubuntu 24.04 with Clang/Ninja. The same
+Evidence: the pinned workflow calls the canonical Python verifier on Ubuntu 24.04 with Clang/Ninja. The same
 path has passed locally and in hosted run `33894071904` at revision `a706a4a`.
 
 ### S009 — Windows x86-64 hosted CI
@@ -115,7 +115,12 @@ remaining failure was the test executable's potentially throwing iostream report
 exception boundary. Terminal test reports now use nonthrowing stdio, success output errors fail the
 test, and controlled standard/unknown exceptions must produce ordinary failure exits.
 
-Gap: hosted Windows lint verification and the new terminal-failure regressions remain pending.
+Evidence: [hosted run 33961881866](https://github.com/SomeoneIsWorking/amigaport/actions/runs/33961881866)
+at main commit `e8f2e30757f27c39621805370fff75d74eb5b939` passed the complete Windows
+synthetic runtime, linked-symbol, formatting, lint, and terminal-failure regression gate. The same
+run passed Linux x86-64, Apple Silicon macOS, and Android cross-build/x86-64 emulator jobs. This is
+asset-free framework evidence; representative gameplay and Android arm64-v8a execution remain the
+gaps recorded in S005–S007 and S011.
 
 ### S010 — Apple Silicon macOS hosted CI
 
