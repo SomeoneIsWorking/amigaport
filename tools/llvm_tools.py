@@ -20,7 +20,9 @@ def apple_clang_tool(name: str) -> str:
     path = Path(completed.stdout.strip())
     if not completed.stdout.strip() or not path.is_file():
         raise RuntimeError(f"Xcode compiler is unavailable: {name}")
-    return str(path.resolve())
+    # The invocation name selects the driver: clang++ may be a symlink to clang.
+    # Following that symlink drops automatic linkage of the C++ runtime.
+    return str(path)
 
 
 def apple_cpp_include_directories(compiler: str, sdk_root: str) -> tuple[str, ...]:

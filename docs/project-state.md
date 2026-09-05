@@ -93,8 +93,9 @@ The fork's embed target owns a Windows-specific feature surface instead of inher
 POSIX headers from the libretro host configuration; a local clang-cl Windows-target syntax check
 accepts every embedded CPU translation unit.
 
-Gap: hosted run `33894071904` failed on PUAE's inherited POSIX feature definitions and compiler
-rejection. The corrected fork pin still needs a successful hosted Windows result.
+Gap: hosted run `33957841121` stopped in a Python test whose expected path separators were
+POSIX-specific. The host-neutral fixture is corrected; the pinned fork still needs a successful
+hosted Windows runtime result.
 
 ### S010 — Apple Silicon macOS hosted CI
 
@@ -104,16 +105,18 @@ AppleClang's libc++ search directories, records the SDK in the compile database,
 same C++ headers and SDK alongside the matching Homebrew resource directory to clang-tidy.
 Intel macOS is not a current product target.
 
-Gap: hosted run `33894071904` built and ran the runtime but failed clang-tidy with missing C library
-declarations under its implicit SDK/header selection. The explicit header contract still needs a
-successful hosted Apple Silicon result.
+Gap: hosted run `33957841121` compiled with AppleClang but lost C++ driver mode when the compiler
+resolver followed the `clang++` symlink to `clang`. The resolver now preserves the invocation name,
+with a regression test covering that exact alias. Hosted linking, runtime, and lint still need to
+pass with the repaired resolver.
 
 ### S011 — Android hosted CI
 
 The Android job consumes `shared/android-port` at its pinned revision and NDK 28.2.13676358/API 21.
 It builds and audits x86-64 and arm64-v8a artifacts on Ubuntu, explicitly grants the ephemeral
 runner access to its KVM device, then runs the synthetic runtime on the hardware-accelerated API 35
-x86-64 emulator selected by exact ADB serial. A successful hosted result remains missing. This does not
+x86-64 emulator selected by exact ADB serial. Hosted run `33957841121` passed both cross-builds,
+linked audits, and x86-64 emulator execution. This does not
 verify arm64-v8a execution;
 that requires a matching physical or hosted ARM64 Android device. APK assembly and installation are
 inapplicable because `amigaport` is an embeddable static library rather than an application package.
@@ -123,6 +126,4 @@ and controlled tests prove the device boundary accepts only the configured onlin
 policy tests also prove that owned shell automation remains rejected while a dependency checkout
 under the authoritative `build/` root is not treated as first-party source.
 
-Gap: hosted run `33894071904` stopped when source policy misclassified a build dependency as owned
-shell automation. A successful repaired Android result and matching-device arm64-v8a execution
-both remain missing.
+Gap: matching-device arm64-v8a execution remains missing.
