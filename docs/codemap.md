@@ -29,6 +29,7 @@ instruction semantics; its libretro frontend is not linked into the runtime.
 | Guest memory | Title-injected checked big-endian access | `include/amigaport/memory.hpp` | `Memory` | — |
 | Diagnostics | Route typed fork diagnostics through the injected configurable logger | `include/amigaport/types.hpp`, `src/puae_core.cpp` | `Logger::write`, `uae_m68k_diagnostics` | — |
 | Build and policy | Pin dependencies, compile only CPU semantics, and verify source, linked-artifact, and host-platform boundaries | `CMakeLists.txt`, `tools/`, `.github/workflows/ci.yml` | `tools/verify.py`, `tools/verification.py`, `tools/link_audit.py` | `README.md` |
+| PE linked definitions | Match the final executable's CodeView GUID/age to its linker PDB and strictly read final-image public records | `tools/pe_symbols.py` | `read_pe_symbols` | `docs/project-state.md` |
 | Focused verification | Exercise shipping state, execution, image, override, and policy seams | `tests/` | `amigaport_tests`, `test_source_policy.py` | `docs/project-state.md` |
 
 ## Where does new work go?

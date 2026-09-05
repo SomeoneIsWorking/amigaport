@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from llvm_tools import find_llvm_tool
+from pe_symbols import read_pe_symbols
 
 CPU_HANDLER = re.compile(r"^op_[0-9a-f]{4}_12_ff$")
 EXPECTED_CPU_HANDLERS = 1_540
@@ -34,7 +35,7 @@ def audit_symbols(symbols: set[str]) -> AuditResult:
 
 
 def normalize_symbol(symbol: str) -> str:
-    """Remove the Mach-O C symbol prefix only for names owned by this audit."""
+    """Remove the Mach-O/32-bit COFF C prefix only for names owned by this audit."""
     if symbol.startswith("_") and (
         CPU_HANDLER.fullmatch(symbol[1:]) or symbol[1:] in FORBIDDEN_SYMBOLS
     ):
@@ -54,6 +55,9 @@ def find_symbol_tool() -> str:
 
 
 def read_symbols(binary: Path) -> set[str]:
+    with binary.open("rb") as stream:
+        if stream.read(2) == b"MZ":
+            return {normalize_symbol(symbol) for symbol in read_pe_symbols(binary)}
     nm = find_symbol_tool()
     defined_only = (
         "-U"
