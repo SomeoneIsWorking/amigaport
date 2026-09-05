@@ -36,6 +36,6 @@ an Android application package.
 ## Dependency and license
 
 The pinned CPU source is `SomeoneIsWorking/libretro-uae` revision
-`2c866ca56a345c720f0667184745f926648e1d9c`, licensed under GPL-2.0. Linking its CPU handlers makes
+`1f2e0a209fa3a147dfe7b2ab4fdb05ab80a7a495`, licensed under GPL-2.0. Linking its CPU handlers makes
 the distributed combined work subject to GPL-2.0. The dependency's libretro frontend and Amiga
 device emulator are not linked into the runtime library.
