@@ -93,11 +93,14 @@ The fork's embed target owns a Windows-specific feature surface instead of inher
 POSIX headers from the libretro host configuration; a local clang-cl Windows-target syntax check
 accepts every embedded CPU translation unit.
 
-Gap: hosted run `33958812997` compiled every CPU and C++ translation unit but could not link because
-PUAE's COFF build omitted the per-function/data COMDAT sections required by `/OPT:REF`. The shared
-embed build policy now supplies `/Gy` and `/Gw`, and a link regression requires an unused function
-with an intentionally unresolved device dependency to be discarded. Native and Windows header
-profile tests also run with the parent suite. Hosted Windows runtime verification remains pending.
+Gap: hosted run `33959749821` showed that COFF resolves undefined references before removing dead
+COMDAT sections. Section flags cannot compensate for compiling unowned CPU/MMU/device functions.
+The embedded source profile now instantiates only 68000 prefetch tables and excludes full-machine
+exception/MMU builders. An intentionally unresolved device fixture must fail linking; a positive
+target links and runs the complete selected runtime archive without section removal. Its local final
+artifact retains all 1,540 table-12 handlers and no forbidden frontend/device symbols. Native and
+Windows header-profile tests run with the parent suite. Hosted Windows runtime verification remains
+pending.
 
 ### S010 — Apple Silicon macOS hosted CI
 
