@@ -14,6 +14,34 @@ import llvm_tools
 
 
 class LlvmToolTests(unittest.TestCase):
+    def test_apple_compiler_keeps_cpp_driver_invocation_name(self) -> None:
+        compiler = Path("/Xcode/usr/bin/clang++")
+        with (
+            mock.patch.object(
+                llvm_tools.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout=str(compiler) + "\n"),
+            ),
+            mock.patch.object(Path, "is_file", return_value=True),
+            mock.patch.object(
+                Path, "resolve", return_value=compiler.with_name("clang")
+            ),
+        ):
+            selected = llvm_tools.apple_clang_tool("clang++")
+        self.assertEqual(selected, str(compiler))
+
+    def test_apple_compiler_refuses_missing_driver(self) -> None:
+        with (
+            mock.patch.object(
+                llvm_tools.subprocess,
+                "run",
+                return_value=SimpleNamespace(stdout="/Xcode/usr/bin/clang++\n"),
+            ),
+            mock.patch.object(Path, "is_file", return_value=False),
+            self.assertRaisesRegex(RuntimeError, "Xcode compiler is unavailable"),
+        ):
+            llvm_tools.apple_clang_tool("clang++")
+
     def test_cpp_headers_follow_appleclang_search_order(self) -> None:
         output = (
             "Apple clang version 17\n"
@@ -35,7 +63,7 @@ class LlvmToolTests(unittest.TestCase):
             paths = llvm_tools.apple_cpp_include_directories(
                 "/Xcode/clang++", "/Xcode/SDK"
             )
-        self.assertEqual(paths, ("/Xcode/SDK/usr/include/c++/v1",))
+        self.assertEqual(paths, (str(Path("/Xcode/SDK/usr/include/c++/v1")),))
         self.assertEqual(
             run.call_args.args[0][:3], ["/Xcode/clang++", "-isysroot", "/Xcode/SDK"]
         )
