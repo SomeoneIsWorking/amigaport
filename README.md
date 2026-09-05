@@ -28,13 +28,14 @@ SDK and libc++ header search paths. Android CI compiles both x86-64 and arm64-v8
 suite on an API 35 x86-64 emulator. The Android job consumes the pinned `shared/android-port`
 contract. It does not claim arm64-v8a runtime verification from that x86-64 emulator.
 
-Linux x86-64 has passed locally and in hosted CI. macOS, Windows, and Android remain
-unverified until their repaired hosted jobs pass. An APK install check is inapplicable because this
-repository produces an embeddable static library, not an Android application package.
+Linux x86-64 has passed locally and in hosted CI. Apple Silicon macOS and Android x86-64 have passed
+their hosted runtime gates; Windows runtime and Android arm64 execution remain unverified. An APK
+install check is inapplicable because this repository produces an embeddable static library, not
+an Android application package.
 
 ## Dependency and license
 
 The pinned CPU source is `SomeoneIsWorking/libretro-uae` revision
-`40270e4a5c96c9195deae1801a76788a1e5bc159`, licensed under GPL-2.0. Linking its CPU handlers makes
+`16d2cc3e613fd1f20520ce48bc3716f4a8d6414e`, licensed under GPL-2.0. Linking its CPU handlers makes
 the distributed combined work subject to GPL-2.0. The dependency's libretro frontend and Amiga
 device emulator are not linked into the runtime library.
