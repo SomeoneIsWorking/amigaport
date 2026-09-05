@@ -13,7 +13,6 @@ from pathlib import Path
 
 from llvm_tools import find_llvm_tool
 
-
 CPU_HANDLER = re.compile(r"^op_[0-9a-f]{4}_12_ff$")
 EXPECTED_CPU_HANDLERS = 1_540
 FORBIDDEN_SYMBOLS = {"retro_init", "retro_load_game", "retro_run", "memory_init"}
@@ -27,7 +26,9 @@ class AuditResult:
 
 
 def audit_symbols(symbols: set[str]) -> AuditResult:
-    handlers = tuple(sorted(symbol for symbol in symbols if CPU_HANDLER.fullmatch(symbol)))
+    handlers = tuple(
+        sorted(symbol for symbol in symbols if CPU_HANDLER.fullmatch(symbol))
+    )
     forbidden = tuple(sorted(symbols & FORBIDDEN_SYMBOLS))
     return AuditResult(len(symbols), handlers, forbidden)
 
