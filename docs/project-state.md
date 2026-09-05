@@ -93,14 +93,23 @@ The fork's embed target owns a Windows-specific feature surface instead of inher
 POSIX headers from the libretro host configuration; a local clang-cl Windows-target syntax check
 accepts every embedded CPU translation unit.
 
-Gap: hosted run `33959749821` showed that COFF resolves undefined references before removing dead
-COMDAT sections. Section flags cannot compensate for compiling unowned CPU/MMU/device functions.
 The embedded source profile now instantiates only 68000 prefetch tables and excludes full-machine
 exception/MMU builders. An intentionally unresolved device fixture must fail linking; a positive
 target links and runs the complete selected runtime archive without section removal. Its local final
 artifact retains all 1,540 table-12 handlers and no forbidden frontend/device symbols. Native and
-Windows header-profile tests run with the parent suite. Hosted Windows runtime verification remains
-pending.
+Windows header-profile tests run with the parent suite. COFF resolves undefined references before
+removing dead COMDAT sections; section flags cannot compensate for compiling unowned functions.
+
+Hosted run `33960527840` at revision `55e2899` passed all 23 Windows compile/link steps, then exposed
+that PE's COFF symbol table is empty. The audit now reads public definitions from the sibling linker
+PDB only after matching its GUID and age against the final executable's CodeView record. Missing,
+mismatched, empty, and malformed evidence fails closed; no input archive is substituted. The same
+1,540-handler and forbidden-owner policy applies. Local parser verification reads LLVM's existing
+redistributable `llvm-symbolizer/pdb/Inputs/test.exe` and matching `test.pdb`: 1,456 public definitions,
+including its three known function probes. This non-CPU fixture correctly fails the CPU-table gate;
+controlled identity, record, and forbidden-owner mutations exercise refusals.
+
+Gap: hosted Windows audit, synthetic execution, and lint verification remain pending.
 
 ### S010 — Apple Silicon macOS hosted CI
 

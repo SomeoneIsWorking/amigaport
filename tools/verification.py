@@ -144,6 +144,7 @@ def common_checks(formatter: str | None = None) -> None:
     run([sys.executable, str(ROOT / "tests" / "test_dependency_pins.py")])
     run([sys.executable, str(ROOT / "tests" / "test_source_policy.py")])
     run([sys.executable, str(ROOT / "tests" / "test_link_audit.py")])
+    run([sys.executable, str(ROOT / "tests" / "test_pe_symbols.py")])
     run([sys.executable, str(ROOT / "tests" / "test_llvm_tools.py")])
     run([sys.executable, str(ROOT / "tests" / "test_verification.py")])
     run(

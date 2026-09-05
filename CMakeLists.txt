@@ -68,5 +68,13 @@ if(AMIGAPORT_BUILD_TESTS)
     target_include_directories(amigaport_tests SYSTEM PRIVATE
         "${AMIGAPORT_PUAE_DIR}/sources/src/include")
     target_link_libraries(amigaport_tests PRIVATE amigaport)
+    if(MSVC)
+        # Audit final-image publics, not archive inputs: PE's COFF symbol table
+        # may be empty. Keep an identity-matched linker PDB beside this image.
+        target_link_options(amigaport_tests PRIVATE /DEBUG:FULL)
+        set_target_properties(amigaport_tests PROPERTIES
+            PDB_NAME amigaport_tests
+            PDB_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
     add_test(NAME amigaport_tests COMMAND amigaport_tests)
 endif()

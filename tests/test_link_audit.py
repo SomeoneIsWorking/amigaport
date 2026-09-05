@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import mock_open, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
@@ -13,6 +14,7 @@ from link_audit import (
     EXPECTED_CPU_HANDLERS,
     audit_symbols,
     normalize_symbol,
+    read_symbols,
 )
 
 
@@ -34,6 +36,17 @@ class LinkAuditTests(unittest.TestCase):
         result = audit_symbols({"main", "retro_run"})
         self.assertEqual(result.cpu_handlers, ())
         self.assertEqual(result.forbidden, ("retro_run",))
+
+    def test_pe_dispatch_reads_linker_pdb_not_empty_coff_table(self) -> None:
+        binary = Path("build/runtime.exe")
+        with (
+            patch("link_audit.Path.open", mock_open(read_data=b"MZ")),
+            patch("link_audit.read_pe_symbols", return_value={"_op_7000_12_ff"}) as pe,
+            patch("link_audit.find_symbol_tool") as nm,
+        ):
+            self.assertEqual(read_symbols(binary), {"op_7000_12_ff"})
+        pe.assert_called_once_with(binary)
+        nm.assert_not_called()
 
 
 if __name__ == "__main__":
