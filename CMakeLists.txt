@@ -14,7 +14,7 @@ option(AMIGAPORT_BUILD_TESTS "Build focused runtime tests" ON)
 
 set(AMIGAPORT_PUAE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libretro-uae" CACHE PATH
     "Pinned maintained libretro-uae checkout")
-set(AMIGAPORT_PUAE_REVISION "16d2cc3e613fd1f20520ce48bc3716f4a8d6414e")
+set(AMIGAPORT_PUAE_REVISION "2c866ca56a345c720f0667184745f926648e1d9c")
 
 foreach(required_path
         "${AMIGAPORT_PUAE_DIR}/COPYING"
@@ -38,6 +38,9 @@ if(NOT AMIGAPORT_PUAE_HEAD STREQUAL AMIGAPORT_PUAE_REVISION)
         "${AMIGAPORT_PUAE_HEAD}")
 endif()
 
+if(AMIGAPORT_BUILD_TESTS)
+    set(PUAE_M68K_EMBED_BUILD_TESTS ON)
+endif()
 add_subdirectory("${AMIGAPORT_PUAE_DIR}/embed" third_party/libretro-uae)
 
 add_library(amigaport STATIC

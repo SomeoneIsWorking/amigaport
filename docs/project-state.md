@@ -93,10 +93,11 @@ The fork's embed target owns a Windows-specific feature surface instead of inher
 POSIX headers from the libretro host configuration; a local clang-cl Windows-target syntax check
 accepts every embedded CPU translation unit.
 
-Gap: hosted run `33958279504` passed Python policy tests and reached the CPU build, but PUAE still
-advertised the POSIX `utime.h` header on Windows. The embedded feature profile now removes all
-unavailable Windows header definitions; native and Windows-profile compile tests preserve both
-sides of that contract. Hosted Windows runtime verification remains pending.
+Gap: hosted run `33958812997` compiled every CPU and C++ translation unit but could not link because
+PUAE's COFF build omitted the per-function/data COMDAT sections required by `/OPT:REF`. The shared
+embed build policy now supplies `/Gy` and `/Gw`, and a link regression requires an unused function
+with an intentionally unresolved device dependency to be discarded. Native and Windows header
+profile tests also run with the parent suite. Hosted Windows runtime verification remains pending.
 
 ### S010 — Apple Silicon macOS hosted CI
 
