@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Keep checked-out dependencies and their executable pin contracts atomic."""
 
 from __future__ import annotations
@@ -9,11 +8,10 @@ import sys
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from verification import ANDROID_PORT_REVISION  # noqa: E402
+from verification import ANDROID_PORT_REVISION
 
 
 class DependencyPinTests(unittest.TestCase):

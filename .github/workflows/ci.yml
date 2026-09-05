@@ -21,7 +21,7 @@ jobs:
             runner: ubuntu-24.04
           - name: Windows x86-64 / clang-cl
             runner: windows-2025
-          - name: macOS arm64 / Clang
+          - name: macOS arm64 / AppleClang
             runner: macos-26
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

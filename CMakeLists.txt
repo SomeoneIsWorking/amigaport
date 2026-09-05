@@ -14,7 +14,7 @@ option(AMIGAPORT_BUILD_TESTS "Build focused runtime tests" ON)
 
 set(AMIGAPORT_PUAE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libretro-uae" CACHE PATH
     "Pinned maintained libretro-uae checkout")
-set(AMIGAPORT_PUAE_REVISION "87998f6c2c4f28609154ecade361c2e89f08fce1")
+set(AMIGAPORT_PUAE_REVISION "40270e4a5c96c9195deae1801a76788a1e5bc159")
 
 foreach(required_path
         "${AMIGAPORT_PUAE_DIR}/COPYING"
@@ -48,9 +48,7 @@ add_library(amigaport STATIC
 add_library(amigaport::amigaport ALIAS amigaport)
 target_include_directories(amigaport
     PUBLIC include
-    PRIVATE
-        src
-        "${AMIGAPORT_PUAE_DIR}/sources/src/include")
+    PRIVATE src)
 if(NOT MSVC)
     target_compile_options(amigaport PRIVATE
         -ffunction-sections
@@ -64,7 +62,7 @@ if(AMIGAPORT_BUILD_TESTS)
         tests/executor_test.cpp
         tests/test_support.cpp)
     target_include_directories(amigaport_tests PRIVATE tests)
-    target_include_directories(amigaport_tests PRIVATE
+    target_include_directories(amigaport_tests SYSTEM PRIVATE
         "${AMIGAPORT_PUAE_DIR}/sources/src/include")
     target_link_libraries(amigaport_tests PRIVATE amigaport)
     add_test(NAME amigaport_tests COMMAND amigaport_tests)

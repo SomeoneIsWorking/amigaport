@@ -21,7 +21,7 @@ S001 is the current focus.
 | S005 | Representative gameplay is conformant and performant on Linux x86-64 | missing | S001 | G001 |
 | S006 | Representative gameplay is conformant and performant on Apple Silicon macOS | missing | S001 | G001 |
 | S007 | Representative gameplay is conformant and performant on Android arm64-v8a | missing | S001 | G001 |
-| S008 | Asset-free Linux x86-64 hosted CI builds, lints, audits, and runs the synthetic runtime | partial | S001 | G001 |
+| S008 | Asset-free Linux x86-64 hosted CI builds, lints, audits, and runs the synthetic runtime | verified | S001 | G001 |
 | S009 | Asset-free Windows x86-64 hosted CI builds, lints, audits, and runs the synthetic runtime | partial | S001 | G001 |
 | S010 | Asset-free Apple Silicon macOS hosted CI builds, lints, audits, and runs the synthetic runtime | partial | S001 | G001 |
 | S011 | Asset-free Android CI builds x86-64 and arm64-v8a and runs the synthetic runtime on a matching emulator ABI | partial | S001 | G001 |
@@ -83,37 +83,46 @@ no host evidence exists.
 ### S008 — Linux x86-64 hosted CI
 
 The pinned workflow calls the canonical Python verifier on Ubuntu 24.04 with Clang/Ninja. The same
-path has passed locally.
-
-Gap: the new hosted job has not run yet; its first successful result is required before this item
-becomes verified.
+path has passed locally and in hosted run `33894071904` at revision `a706a4a`.
 
 ### S009 — Windows x86-64 hosted CI
 
 The pinned workflow configures the complete fork-backed runtime with clang-cl/Ninja, runs synthetic
 execution and link audits, and applies clang-format and clang-tidy through the canonical verifier.
+The fork's embed target owns a Windows-specific feature surface instead of inheriting unavailable
+POSIX headers from the libretro host configuration; a local clang-cl Windows-target syntax check
+accepts every embedded CPU translation unit.
 
-Gap: no hosted result exists yet, so Windows runtime support is not claimed.
+Gap: hosted run `33894071904` failed on PUAE's inherited POSIX feature definitions and compiler
+rejection. The corrected fork pin still needs a successful hosted Windows result.
 
 ### S010 — Apple Silicon macOS hosted CI
 
-The pinned workflow selects GitHub's macOS 26 arm64 runner and its maintained Homebrew LLVM
-toolchain, then runs the complete synthetic verifier and Mach-O-aware linked-symbol audit with one
-matching compiler/linter resource tree. Intel macOS is not a current product target.
+The pinned workflow selects GitHub's macOS 26 arm64 runner and AppleClang, then runs the complete
+synthetic verifier and Mach-O-aware linked-symbol audit. It resolves the active macOS SDK and
+AppleClang's libc++ search directories, records the SDK in the compile database, and supplies the
+same C++ headers and SDK alongside the matching Homebrew resource directory to clang-tidy.
+Intel macOS is not a current product target.
 
-Gap: no hosted Apple Silicon result exists yet.
+Gap: hosted run `33894071904` built and ran the runtime but failed clang-tidy with missing C library
+declarations under its implicit SDK/header selection. The explicit header contract still needs a
+successful hosted Apple Silicon result.
 
 ### S011 — Android hosted CI
 
 The Android job consumes `shared/android-port` at its pinned revision and NDK 28.2.13676358/API 21.
 It builds and audits x86-64 and arm64-v8a artifacts on Ubuntu, explicitly grants the ephemeral
 runner access to its KVM device, then runs the synthetic runtime on the hardware-accelerated API 35
-x86-64 emulator selected by exact ADB serial. The first hosted result remains missing. This does not
+x86-64 emulator selected by exact ADB serial. A successful hosted result remains missing. This does not
 verify arm64-v8a execution;
 that requires a matching physical or hosted ARM64 Android device. APK assembly and installation are
 inapplicable because `amigaport` is an embeddable static library rather than an application package.
 
 Evidence: the focused local gate cross-builds and link-audits both ABIs against the pinned PUAE fork,
-and controlled tests prove the device boundary accepts only the configured online emulator.
+and controlled tests prove the device boundary accepts only the configured online emulator. Source
+policy tests also prove that owned shell automation remains rejected while a dependency checkout
+under the authoritative `build/` root is not treated as first-party source.
 
-Gap: the first hosted Android result and matching-device arm64-v8a execution both remain missing.
+Gap: hosted run `33894071904` stopped when source policy misclassified a build dependency as owned
+shell automation. A successful repaired Android result and matching-device arm64-v8a execution
+both remain missing.
