@@ -14,7 +14,7 @@ option(AMIGAPORT_BUILD_TESTS "Build focused runtime tests" ON)
 
 set(AMIGAPORT_PUAE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libretro-uae" CACHE PATH
     "Pinned maintained libretro-uae checkout")
-set(AMIGAPORT_PUAE_REVISION "1f2e0a209fa3a147dfe7b2ab4fdb05ab80a7a495")
+set(AMIGAPORT_PUAE_REVISION "2ce0ad39d3e95bfc61981a267d407c47c9c8bd51")
 
 foreach(required_path
         "${AMIGAPORT_PUAE_DIR}/COPYING"
