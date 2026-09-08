@@ -120,6 +120,15 @@ class Executor::Impl final {
         return *owner_pointer;
     }
 
+    void synchronize_active_stack_pointer() noexcept {
+        const bool supervisor = (cpu.sr & 0x2000U) != 0U;
+        if (supervisor) {
+            cpu.supervisor_stack_pointer = cpu.address[7];
+        } else {
+            cpu.user_stack_pointer = cpu.address[7];
+        }
+    }
+
     RuntimeConfig config;
     Memory &memory;
     Logger &logger;
@@ -165,6 +174,7 @@ ExecutionExit Executor::execute(InstructionBudget instruction_budget) {
     if (impl_->image.tag.value == 0U) {
         return impl_->make_exit(ExitReason::NoImage, {});
     }
+    impl_->synchronize_active_stack_pointer();
     if (!cpu_state_is_valid(impl_->cpu)) {
         throw std::invalid_argument("CPU state is not a valid 68000 architectural state");
     }
@@ -183,6 +193,7 @@ ExecutionExit Executor::call_original(InstructionBudget instruction_budget) {
     }
     detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
                                                             impl_->active_overrides.back());
+    impl_->synchronize_active_stack_pointer();
     return impl_->run(instruction_budget.value);
 }
 

@@ -132,6 +132,31 @@ void test_image_qualified_override_and_original_call() {
     require(executor.state().data[0] == 7U, "removed override blocked guest execution");
 }
 
+void test_native_stack_view_reconciles_before_guest_reentry() {
+    VectorMemory memory(16);
+    RecordingLogger logger;
+    memory.load16({.address = 0, .value = 0x4E71}); // NOP
+
+    amigaport::Executor executor({.max_instructions_per_slice = 4}, memory, logger);
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 0;
+    executor.state().supervisor_stack_pointer = 0;
+    executor.replace_image(main_image);
+    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    executor.register_override(identity, [&](amigaport::Executor &runtime) {
+        runtime.state().address[7] = 0x80;
+        return runtime.call_original({.value = 1});
+    });
+
+    const auto result = executor.call(0, {.value = 1});
+    require(result.reason == amigaport::ExitReason::NativeOverride,
+            "stack-view override did not return through its native boundary");
+    require(executor.state().supervisor_stack_pointer == 0x80U,
+            "active A7 was not reconciled into the supervisor stack pointer");
+    require(executor.state().address[7] == executor.state().supervisor_stack_pointer,
+            "reconciled architectural stack state is inconsistent");
+}
+
 void test_memory_branch_and_prefetch_paths() {
     VectorMemory memory(128);
     RecordingLogger logger;
@@ -297,6 +322,7 @@ int main(int argc, char **argv) {
         }
         test_upstream_moveq_and_budget_exit();
         test_image_qualified_override_and_original_call();
+        test_native_stack_view_reconciles_before_guest_reentry();
         test_memory_branch_and_prefetch_paths();
         test_interrupt_entry_is_not_an_executed_instruction();
         test_precise_unsupported_and_memory_fault_exits();
@@ -313,7 +339,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    return std::puts("amigaport_tests: 7 scenarios passed") == EOF || std::fflush(stdout) == EOF
+    return std::puts("amigaport_tests: 8 scenarios passed") == EOF || std::fflush(stdout) == EOF
                ? EXIT_FAILURE
                : EXIT_SUCCESS;
 }
