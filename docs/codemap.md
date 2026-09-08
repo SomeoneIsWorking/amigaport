@@ -23,7 +23,7 @@ instruction semantics; its libretro frontend is not linked into the runtime.
 | Public execution contract | Compose state, memory, images, overrides, and bounded execution | `include/amigaport/`, `src/executor.cpp` | `amigaport::Executor` | `docs/project-state.md` |
 | Architectural state | Registers, SR, supervisor/interrupt/exception and cycle state | `include/amigaport/cpu_state.hpp`, `src/cpu_state.cpp` | `CpuState` | `docs/project-state.md` |
 | Image identity | Opaque title-owned image tag and monotonically replaced generation | `include/amigaport/types.hpp`, `src/executor.cpp` | `replace_image` | `docs/project-state.md` |
-| Native interception | Image-qualified registry and scoped current-key suppression | `src/override_registry.*`, `src/executor.cpp` | `register_override`, `call_original` | `docs/project-state.md` |
+| Native interception | Image-qualified registry, scoped current-key suppression, and guest continuation boundaries | `src/override_registry.*`, `src/executor.cpp` | `register_override`, `call_original_subroutine`, `call_interrupt` | `docs/project-state.md` |
 | Maintained CPU API | Own opaque contexts, complete 68000 dispatch construction, callback memory, prefetch and exception entry | `third_party/libretro-uae/embed/`, `third_party/libretro-uae/sources/src/m68k_embed.c`, `third_party/libretro-uae/sources/src/include/uae/m68k_embed.h` | `PUAE::M68kEmbed`, `uae_m68k_step` | `docs/project-state.md` |
 | Maintained CPU binding | Convert public C++ state and memory contracts to the fork-supported API | `src/puae_core.*` | `PuaeCore::step` | `docs/project-state.md` |
 | Guest memory | Title-injected checked big-endian access | `include/amigaport/memory.hpp` | `Memory` | — |

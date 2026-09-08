@@ -2,8 +2,9 @@
 
 #include "amigaport/executor.hpp"
 
-#include <map>
+#include <cstddef>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace amigaport::detail {
@@ -27,9 +28,13 @@ class OverrideRegistry final {
     };
 
   private:
+    struct Hash final {
+        [[nodiscard]] std::size_t operator()(ExecutionIdentity identity) const noexcept;
+    };
+
     [[nodiscard]] bool is_suppressed(ExecutionIdentity identity) const;
 
-    std::map<ExecutionIdentity, NativeOverride> overrides_;
+    std::unordered_map<ExecutionIdentity, NativeOverride, Hash> overrides_;
     std::vector<ExecutionIdentity> suppressions_;
 };
 
