@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 namespace amigaport {
 
@@ -55,7 +56,10 @@ class Executor final {
     [[nodiscard]] ExecutionExit execute(InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call(GuestAddress address,
                                      InstructionBudget instruction_budget = {});
+    [[nodiscard]] ExecutionExit call_interrupt(GuestAddress address,
+                                               InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call_original(InstructionBudget instruction_budget = {});
+    [[nodiscard]] ExecutionExit call_original_subroutine(InstructionBudget instruction_budget = {});
 
   private:
     class Impl;

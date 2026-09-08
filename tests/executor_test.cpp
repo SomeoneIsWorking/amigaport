@@ -157,6 +157,56 @@ void test_native_stack_view_reconciles_before_guest_reentry() {
             "reconciled architectural stack state is inconsistent");
 }
 
+void test_original_subroutine_returns_at_guest_rts() {
+    VectorMemory memory(256);
+    RecordingLogger logger;
+    memory.load16({.address = 0, .value = 0x7007}); // MOVEQ #7,D0
+    memory.load16({.address = 2, .value = 0x4E75}); // RTS
+    memory.load32({.address = 0x80, .value = 0x40});
+
+    amigaport::Executor executor({.max_instructions_per_slice = 8}, memory, logger);
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 0x80;
+    executor.state().supervisor_stack_pointer = 0x80;
+    executor.replace_image(main_image);
+    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    executor.register_override(identity, [&](amigaport::Executor &runtime) {
+        return runtime.call_original_subroutine({.value = 4});
+    });
+
+    const auto result = executor.call(0, {.value = 4});
+    require(result.reason == amigaport::ExitReason::NativeOverride,
+            "original subroutine override did not return through native boundary");
+    require(result.instructions == 2U, "original subroutine instruction count is wrong");
+    require(executor.state().data[0] == 7U, "original subroutine body did not execute");
+    require(executor.state().pc == 0x40U, "original subroutine did not stop at guest RTS");
+    require(executor.state().address[7] == 0x84U,
+            "guest RTS did not consume caller return address");
+}
+
+void test_interrupt_call_returns_through_guest_rte() {
+    VectorMemory memory(512);
+    RecordingLogger logger;
+    memory.load16({.address = 0x100, .value = 0x7007}); // MOVEQ #7,D0
+    memory.load16({.address = 0x102, .value = 0x4E73}); // RTE
+
+    amigaport::Executor executor({.max_instructions_per_slice = 8}, memory, logger);
+    executor.state().pc = 0x20;
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 0x180;
+    executor.state().supervisor_stack_pointer = 0x180;
+    executor.replace_image(main_image);
+
+    const auto result = executor.call_interrupt(0x100, {.value = 4});
+    require(result.reason == amigaport::ExitReason::ReturnToHost,
+            "interrupt call did not stop at guest RTE");
+    require(result.instructions == 2U, "interrupt call instruction count is wrong");
+    require(executor.state().data[0] == 7U, "interrupt body did not execute");
+    require(executor.state().pc == 0x20U, "RTE did not restore interrupted PC");
+    require(executor.state().sr == 0x2700U, "RTE did not restore interrupted SR");
+    require(executor.state().address[7] == 0x180U, "RTE did not restore interrupted stack");
+}
+
 void test_memory_branch_and_prefetch_paths() {
     VectorMemory memory(128);
     RecordingLogger logger;
@@ -323,6 +373,8 @@ int main(int argc, char **argv) {
         test_upstream_moveq_and_budget_exit();
         test_image_qualified_override_and_original_call();
         test_native_stack_view_reconciles_before_guest_reentry();
+        test_original_subroutine_returns_at_guest_rts();
+        test_interrupt_call_returns_through_guest_rte();
         test_memory_branch_and_prefetch_paths();
         test_interrupt_entry_is_not_an_executed_instruction();
         test_precise_unsupported_and_memory_fault_exits();
@@ -339,7 +391,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    return std::puts("amigaport_tests: 8 scenarios passed") == EOF || std::fflush(stdout) == EOF
+    return std::puts("amigaport_tests: 10 scenarios passed") == EOF || std::fflush(stdout) == EOF
                ? EXIT_FAILURE
                : EXIT_SUCCESS;
 }

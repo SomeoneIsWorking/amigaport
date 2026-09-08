@@ -6,6 +6,15 @@
 
 namespace amigaport::detail {
 
+std::size_t OverrideRegistry::Hash::operator()(ExecutionIdentity identity) const noexcept {
+    std::size_t value = static_cast<std::size_t>(identity.image.tag.value);
+    value ^= static_cast<std::size_t>(identity.image.generation) + 0x9E3779B9u + (value << 6U) +
+             (value >> 2U);
+    value ^=
+        static_cast<std::size_t>(identity.address) + 0x9E3779B9u + (value << 6U) + (value >> 2U);
+    return value;
+}
+
 void OverrideRegistry::install(ExecutionIdentity identity, NativeOverride function) {
     if (!function) {
         throw std::invalid_argument("native override must be callable");

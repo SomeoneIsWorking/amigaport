@@ -16,7 +16,7 @@ S001 is the current focus.
 | --- | --- | --- | --- | --- |
 | S001 | Runtime executes the complete 68000 instruction set through the maintained PUAE CPU owner | partial | — | G001 |
 | S002 | Complete D/A/PC/SR, supervisor, interrupt, exception, prefetch, and cycle state has one public owner | partial | S001 | G001 |
-| S003 | Image-generation-aware overrides and scoped original calls use the shipping dispatcher | verified | S001 | G001 |
+| S003 | Image-generation-aware overrides, guest-RTE interrupt calls, and scoped original subroutines use the shipping dispatcher | verified | S001 | G001 |
 | S004 | Bounded exits preserve precise guest identity, instruction counts, cycles, faults, opcodes, and exceptions | verified | S001 | G001 |
 | S005 | Representative gameplay is conformant and performant on Linux x86-64 | missing | S001 | G001 |
 | S006 | Representative gameplay is conformant and performant on Apple Silicon macOS | missing | S001 | G001 |
@@ -57,8 +57,9 @@ instruction differential evidence against a full PUAE oracle remain unverified.
 
 ### S003 — Image-aware overrides
 
-Evidence: focused tests prove a matching generation enters a native override, its scoped original call
-executes the upstream guest body without recursion, and an image replacement makes the old key stale.
+Evidence: focused tests prove a matching generation enters a native override, its scoped original
+subroutine executes the upstream guest body through guest RTS without recursion, an interrupt call
+returns through guest RTE, and an image replacement makes the old key stale.
 
 ### S004 — Bounded exits
 

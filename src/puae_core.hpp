@@ -8,7 +8,13 @@
 namespace amigaport::detail {
 
 struct CoreStep final {
-    enum class Status : std::uint8_t { Completed, MemoryFault, Exception, Halted } status{};
+    enum class Status : std::uint8_t {
+        Completed,
+        ReturnedFromInterrupt,
+        MemoryFault,
+        Exception,
+        Halted
+    } status{};
     std::uint64_t cycles{};
     MemoryFault memory_fault{};
     GuestAddress fault_address{};

@@ -146,6 +146,8 @@ CoreStep PuaeCore::step(CpuState &state) {
         status = CoreStep::Status::Exception;
     } else if (result.status == UAE_M68K_STEP_HALTED) {
         status = CoreStep::Status::Halted;
+    } else if (result.opcode == 0x4E73U) {
+        status = CoreStep::Status::ReturnedFromInterrupt;
     }
     return {.status = status,
             .cycles = result.cycles,

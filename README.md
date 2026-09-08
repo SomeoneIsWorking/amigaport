@@ -11,7 +11,8 @@ The maintained `SomeoneIsWorking/libretro-uae` fork exports an embeddable CMake 
 for isolated 68000 contexts. The runtime expands all 45,815 legal 68000 encodings through PUAE's
 1,540 canonical prefetch handlers and proves live guest fetch, memory callbacks, branches, cycle and
 prefetch state, basic exception and interrupt entry, nested contexts, image replacement, native
-overrides, and scoped-original dispatch. Exact 68000 bus/address-error frames and trace conformance,
+overrides, guest-RTE interrupt calls, and scoped-original subroutine dispatch. Exact 68000
+bus/address-error frames and trace conformance,
 Benefactor integration, and gameplay qualification remain missing; see `docs/project-state.md`.
 
 ## Build and verify
