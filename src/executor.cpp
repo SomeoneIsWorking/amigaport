@@ -66,6 +66,8 @@ class Executor::Impl final {
             if (NativeOverride *function = overrides.find(current); function != nullptr) {
                 ActiveOverrideScope active_scope(*this, current);
                 ExecutionExit result = (*function)(owner());
+                if (result.continue_execution)
+                    continue;
                 result.reason = ExitReason::NativeOverride;
                 return result;
             }
