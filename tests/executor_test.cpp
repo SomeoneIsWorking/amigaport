@@ -132,6 +132,31 @@ void test_image_qualified_override_and_original_call() {
     require(executor.state().data[0] == 7U, "removed override blocked guest execution");
 }
 
+void test_native_override_can_continue_without_unwinding_guest_call() {
+    VectorMemory memory(16);
+    RecordingLogger logger;
+    memory.load16({.address = 2, .value = 0x7007}); // MOVEQ #7,D0
+
+    amigaport::Executor executor({.max_instructions_per_slice = 4}, memory, logger);
+    executor.state().sr = 0x2000;
+    executor.state().address[7] = 0;
+    executor.replace_image(main_image);
+    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    executor.register_override(identity, [](amigaport::Executor &runtime) {
+        runtime.state().pc = 2;
+        runtime.state().prefetch_valid = false;
+        amigaport::ExecutionExit result{};
+        result.continue_execution = true;
+        return result;
+    });
+
+    const auto result = executor.call(0, {.value = 1});
+    require(result.reason == amigaport::ExitReason::InstructionBudget,
+            "native continuation did not stay inside the guest run");
+    require(result.instructions == 1U, "native continuation changed guest instruction accounting");
+    require(executor.state().data[0] == 7U, "native continuation did not execute its target");
+}
+
 void test_native_stack_view_reconciles_before_guest_reentry() {
     VectorMemory memory(16);
     RecordingLogger logger;
@@ -372,6 +397,7 @@ int main(int argc, char **argv) {
         }
         test_upstream_moveq_and_budget_exit();
         test_image_qualified_override_and_original_call();
+        test_native_override_can_continue_without_unwinding_guest_call();
         test_native_stack_view_reconciles_before_guest_reentry();
         test_original_subroutine_returns_at_guest_rts();
         test_interrupt_call_returns_through_guest_rte();
@@ -391,7 +417,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    return std::puts("amigaport_tests: 10 scenarios passed") == EOF || std::fflush(stdout) == EOF
+    return std::puts("amigaport_tests: 11 scenarios passed") == EOF || std::fflush(stdout) == EOF
                ? EXIT_FAILURE
                : EXIT_SUCCESS;
 }

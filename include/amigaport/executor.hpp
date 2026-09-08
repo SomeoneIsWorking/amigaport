@@ -24,6 +24,9 @@ enum class ExitReason : std::uint8_t {
 
 struct ExecutionExit final {
     ExitReason reason{ExitReason::InstructionBudget};
+    // A native callback changed the current CPU PC and asks the active run to
+    // continue without unwinding its guest-call boundary.
+    bool continue_execution{};
     ExecutionIdentity identity{};
     std::uint32_t instructions{};
     std::uint64_t cycles{};
