@@ -229,7 +229,13 @@ class Executor::Impl final {
         cpu.prefetch_valid = false;
         const auto result = run(instruction_budget.value, true);
         if (result.reason != ExitReason::ReturnToHost) {
+            /* Architectural state rolls back, but guest TIME does not: those
+             * cycles were really spent, and a host that derives the video beam
+             * from this counter must not see them un-happen. Carry the counter
+             * across the restore. */
+            const std::uint64_t spent = cpu.elapsed_cycles;
             cpu = saved_state;
+            cpu.elapsed_cycles = spent;
             restore_frame();
         }
         return result;
