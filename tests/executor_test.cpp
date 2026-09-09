@@ -382,6 +382,74 @@ void test_nested_context_execution_is_isolated() {
 
 } // namespace
 
+void test_unterminated_native_override_fails_closed() {
+    VectorMemory memory(16);
+    RecordingLogger logger;
+
+    amigaport::Executor executor({.max_instructions_per_slice = 4}, memory, logger);
+    executor.state().sr = 0x2000;
+    executor.state().address[7] = 0;
+    executor.replace_image(main_image);
+    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    executor.register_override(identity, [](amigaport::Executor &) {
+        return amigaport::ExecutionExit{}; // completes no boundary at all
+    });
+
+    const auto result = executor.call(0, {.value = 4});
+    require(result.reason == amigaport::ExitReason::UnterminatedNativeOverride,
+            "an override that completed no boundary did not fail closed");
+    require(result.identity.address == 0U, "unterminated override exit lost its address");
+}
+
+void test_native_continuation_reauthorizes_a_replaced_image() {
+    VectorMemory memory(16);
+    RecordingLogger logger;
+    memory.load16({.address = 2, .value = 0x7007}); // MOVEQ #7,D0
+
+    amigaport::Executor executor({.max_instructions_per_slice = 4}, memory, logger);
+    executor.state().sr = 0x2000;
+    executor.state().address[7] = 0;
+    executor.replace_image(main_image);
+    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    executor.register_override(identity, [](amigaport::Executor &runtime) {
+        runtime.replace_image({.value = 9});
+        runtime.state().pc = 2;
+        runtime.state().prefetch_valid = false;
+        amigaport::ExecutionExit result{};
+        result.continue_execution = true;
+        return result;
+    });
+
+    const auto result = executor.call(0, {.value = 1});
+    require(result.reason == amigaport::ExitReason::InstructionBudget,
+            "an override that replaced the image and continued did not keep running");
+    require(executor.state().data[0] == 7U,
+            "the continued run did not execute in the image the override chose");
+}
+
+void test_execution_trace_records_retired_instructions() {
+    VectorMemory memory(16);
+    RecordingLogger logger;
+    memory.load16({.address = 0, .value = 0x7007}); // MOVEQ #7,D0
+    memory.load16({.address = 2, .value = 0x7208}); // MOVEQ #8,D1
+
+    amigaport::Executor executor({.max_instructions_per_slice = 2}, memory, logger);
+    executor.state().sr = 0x2000;
+    executor.state().address[7] = 0;
+    executor.replace_image(main_image);
+    (void)executor.call(0, {.value = 2});
+
+    std::array<amigaport::ExecutionTraceEntry, 4> entries{};
+    const std::size_t count = executor.recent_execution(entries.data(), entries.size());
+    require(count == 2U, "the execution trace did not record both retired instructions");
+    require(entries[0].pc == 0U && entries[0].opcode == 0x7007U,
+            "the execution trace lost the first retired instruction");
+    require(entries[1].pc == 2U && entries[1].opcode == 0x7208U,
+            "the execution trace lost the second retired instruction");
+    require(amigaport::Executor::recent_execution_capacity() >= count,
+            "the reported trace capacity is smaller than what it returned");
+}
+
 int main(int argc, char **argv) {
     try {
         // These controlled failures exercise this executable's terminal error
@@ -406,6 +474,9 @@ int main(int argc, char **argv) {
         test_precise_unsupported_and_memory_fault_exits();
         test_complete_68000_dispatch_population();
         test_nested_context_execution_is_isolated();
+        test_unterminated_native_override_fails_closed();
+        test_native_continuation_reauthorizes_a_replaced_image();
+        test_execution_trace_records_retired_instructions();
     } catch (const std::exception &error) {
         // Terminal test diagnostics must not throw while handling a failure.
         std::fputs("amigaport_tests: ", stderr);

@@ -3,12 +3,39 @@
 #include "override_registry.hpp"
 #include "puae_core.hpp"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstddef>
 #include <limits>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 namespace amigaport {
+namespace {
+
+constexpr std::size_t kExecutionTraceCapacity = 256U;
+
+/* One trace slot is a single relaxed 64-bit word so a reader in a fatal signal
+ * handler or another thread always observes a whole entry, never a torn one. */
+constexpr std::uint64_t pack_trace_entry(GuestAddress pc, std::uint16_t opcode,
+                                         std::uint32_t image_tag) noexcept {
+    return static_cast<std::uint64_t>(pc) | (static_cast<std::uint64_t>(opcode) << 32U) |
+           (static_cast<std::uint64_t>(image_tag & 0xFFU) << 48U) | (1ULL << 56U);
+}
+
+constexpr bool unpack_trace_entry(std::uint64_t packed, ExecutionTraceEntry &entry) noexcept {
+    if ((packed >> 56U) == 0U) {
+        return false;
+    }
+    entry = {.pc = static_cast<GuestAddress>(packed),
+             .opcode = static_cast<std::uint16_t>(packed >> 32U),
+             .image_tag = static_cast<std::uint8_t>(packed >> 48U)};
+    return true;
+}
+
+} // namespace
 
 class Executor::Impl final {
   public:
@@ -49,14 +76,19 @@ class Executor::Impl final {
         const std::uint32_t budget =
             requested_budget == 0U ? config.max_instructions_per_slice
                                    : std::min(requested_budget, config.max_instructions_per_slice);
-        const ImageGeneration starting_generation = image.generation;
+        /* The run is authorized for the image it started in; a replacement from
+         * anywhere else must end it. A native override that replaces the image
+         * and asks to continue re-authorizes the run for its new image — that
+         * act IS the transition, and unwinding it would strand the guest flow
+         * that jumped into the new image. */
+        ImageGeneration authorized_generation = image.generation;
         SliceProgress progress;
 
         while (progress.instructions < budget) {
             if (cpu.halted) {
                 return make_exit(ExitReason::Halted, progress);
             }
-            if (image.generation != starting_generation) {
+            if (image.generation != authorized_generation) {
                 return make_exit(ExitReason::ImageReplaced, progress);
             }
             if (stop_at_pc && cpu.pc == *stop_at_pc) {
@@ -64,15 +96,17 @@ class Executor::Impl final {
             }
             const ExecutionIdentity current = identity();
             if (NativeOverride *function = overrides.find(current); function != nullptr) {
-                ActiveOverrideScope active_scope(*this, current);
-                ExecutionExit result = (*function)(owner());
-                if (result.continue_execution)
+                ExecutionExit result = run_override(*function, current);
+                if (result.continue_execution) {
+                    authorized_generation = image.generation;
                     continue;
-                result.reason = ExitReason::NativeOverride;
+                }
                 return result;
             }
 
+            const GuestAddress step_pc = cpu.pc;
             const detail::CoreStep step = core.step(cpu);
+            record_execution(step_pc, step.instruction_word);
             if (step.status == detail::CoreStep::Status::MemoryFault) {
                 logger.write(LogLevel::Error, "cpu", "68000 memory access failed");
                 ExecutionExit result = make_exit(ExitReason::MemoryFault, progress);
@@ -115,6 +149,33 @@ class Executor::Impl final {
         }
 
         return make_exit(ExitReason::InstructionBudget, progress);
+    }
+
+    /* Run one native override and hold it to its boundary. A replacement that
+     * returns with the PC still on its own address has consumed neither the
+     * guest call nor a continuation, so resuming would re-enter it forever;
+     * fail closed with the address instead of hanging the host. */
+    [[nodiscard]] ExecutionExit run_override(NativeOverride &function, ExecutionIdentity current) {
+        ActiveOverrideScope active_scope(*this, current);
+        ExecutionExit result = function(owner());
+        if (result.continue_execution) {
+            return result;
+        }
+        if (result.hand_off_to_host) {
+            /* The override ended the run on purpose; the host owns what happens
+             * next, so this override's PC is not the executor's business. */
+            result.reason = ExitReason::ReturnToHost;
+            return result;
+        }
+        if (cpu.pc == current.address) {
+            logger.write(LogLevel::Error, "executor",
+                         "native override returned without completing its guest boundary");
+            result = make_exit(ExitReason::UnterminatedNativeOverride, {});
+            result.identity = current;
+            return result;
+        }
+        result.reason = ExitReason::NativeOverride;
+        return result;
     }
 
     [[nodiscard]] ExecutionExit make_exit(ExitReason reason,
@@ -181,6 +242,32 @@ class Executor::Impl final {
         return *owner_pointer;
     }
 
+    void record_execution(GuestAddress pc, std::uint16_t opcode) noexcept {
+        const std::uint64_t index = trace_written.load(std::memory_order_relaxed);
+        trace[index % kExecutionTraceCapacity].store(pack_trace_entry(pc, opcode, image.tag.value),
+                                                     std::memory_order_relaxed);
+        trace_written.store(index + 1U, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] std::size_t copy_recent_execution(ExecutionTraceEntry *destination,
+                                                    std::size_t capacity) const noexcept {
+        if (destination == nullptr || capacity == 0U) {
+            return 0U;
+        }
+        const std::uint64_t written = trace_written.load(std::memory_order_relaxed);
+        const std::uint64_t available = std::min<std::uint64_t>(written, kExecutionTraceCapacity);
+        const std::uint64_t wanted = std::min<std::uint64_t>(available, capacity);
+        std::size_t count = 0U;
+        for (std::uint64_t offset = wanted; offset > 0U; --offset) {
+            const std::uint64_t packed =
+                trace[(written - offset) % kExecutionTraceCapacity].load(std::memory_order_relaxed);
+            if (unpack_trace_entry(packed, destination[count])) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
     void synchronize_active_stack_pointer() noexcept {
         const bool supervisor = (cpu.sr & 0x2000U) != 0U;
         if (supervisor) {
@@ -198,6 +285,8 @@ class Executor::Impl final {
     detail::OverrideRegistry overrides;
     detail::PuaeCore core;
     std::vector<ExecutionIdentity> active_overrides;
+    std::array<std::atomic<std::uint64_t>, kExecutionTraceCapacity> trace{};
+    std::atomic<std::uint64_t> trace_written{0};
     Executor *owner_pointer{};
 };
 
@@ -213,6 +302,13 @@ void Executor::ImplDeleter::operator()(Impl *implementation) const noexcept {
 CpuState &Executor::state() noexcept { return impl_->cpu; }
 const CpuState &Executor::state() const noexcept { return impl_->cpu; }
 ImageIdentity Executor::image() const noexcept { return impl_->image; }
+
+std::size_t Executor::recent_execution(ExecutionTraceEntry *destination,
+                                       std::size_t capacity) const noexcept {
+    return impl_->copy_recent_execution(destination, capacity);
+}
+
+std::size_t Executor::recent_execution_capacity() noexcept { return kExecutionTraceCapacity; }
 
 ImageIdentity Executor::replace_image(ImageTag tag) {
     if (tag.value == 0U) {
