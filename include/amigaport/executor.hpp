@@ -25,6 +25,9 @@ enum class ExitReason : std::uint8_t {
      * neither continued execution nor moved the PC off its own address, so
      * resuming would re-enter it forever. */
     UnterminatedNativeOverride,
+    /* Execution reached an address the host asked to stop on. The PC is left
+     * ON that address, not past it, so the instruction has not run yet. */
+    Breakpoint,
 };
 
 struct ExecutionExit final {
@@ -74,6 +77,20 @@ class Executor final {
     ImageIdentity replace_image(ImageTag tag);
     void register_override(ExecutionIdentity identity, NativeOverride function);
     void remove_override(ExecutionIdentity identity);
+
+    /* Stop execution when the PC reaches `address`, before the instruction
+     * there runs, exiting with ExitReason::Breakpoint. A run never breaks on
+     * its own first instruction, so resuming from a breakpoint continues past
+     * it instead of stopping on it forever.
+     *
+     * set_breakpoint returns false if the address is already set or the set is
+     * full (breakpoint_capacity); clear_breakpoint returns false if it was not
+     * set. `breakpoints` copies out the current addresses in no order. */
+    bool set_breakpoint(GuestAddress address);
+    bool clear_breakpoint(GuestAddress address);
+    void clear_breakpoints();
+    [[nodiscard]] std::size_t breakpoints(GuestAddress *destination, std::size_t capacity) const;
+    [[nodiscard]] static std::size_t breakpoint_capacity() noexcept;
 
     [[nodiscard]] ExecutionExit execute(InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call(GuestAddress address,

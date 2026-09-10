@@ -450,6 +450,48 @@ void test_execution_trace_records_retired_instructions() {
             "the reported trace capacity is smaller than what it returned");
 }
 
+void test_breakpoint_stops_before_the_instruction_and_resume_continues() {
+    VectorMemory memory(16);
+    RecordingLogger logger;
+    memory.load16({.address = 0, .value = 0x7007}); // MOVEQ #7,D0
+    memory.load16({.address = 2, .value = 0x7208}); // MOVEQ #8,D1
+    memory.load16({.address = 4, .value = 0x7409}); // MOVEQ #9,D2
+
+    amigaport::Executor executor({.max_instructions_per_slice = 8}, memory, logger);
+    executor.state().sr = 0x2000;
+    executor.state().address[7] = 0;
+    executor.replace_image(main_image);
+
+    require(executor.set_breakpoint(4), "a fresh breakpoint was refused");
+    require(!executor.set_breakpoint(4), "the same breakpoint was accepted twice");
+    std::array<amigaport::GuestAddress, 4> listed{};
+    require(executor.breakpoints(listed.data(), listed.size()) == 1U,
+            "the breakpoint set did not report exactly one address");
+    require(listed[0] == 4U, "the breakpoint set reported the wrong address");
+
+    const amigaport::ExecutionExit stopped = executor.execute({.value = 8});
+    require(stopped.reason == amigaport::ExitReason::Breakpoint,
+            "execution did not stop on the breakpoint");
+    require(executor.state().pc == 4U, "the breakpoint ran the instruction it stopped on");
+    require(executor.state().data[1] == 8U, "the instruction before the breakpoint did not run");
+    require(executor.state().data[2] != 9U, "the breakpoint's own instruction ran");
+
+    /* Resuming must make progress rather than stop on the same address again:
+     * a run never breaks on its own first instruction. */
+    const amigaport::ExecutionExit resumed = executor.execute({.value = 8});
+    require(resumed.reason != amigaport::ExitReason::Breakpoint,
+            "resuming stopped on the breakpoint it had just reported");
+    require(executor.state().data[2] == 9U, "resuming did not execute past the breakpoint");
+
+    require(executor.clear_breakpoint(4), "clearing a set breakpoint reported nothing to clear");
+    require(!executor.clear_breakpoint(4), "clearing an unset breakpoint reported success");
+    executor.clear_breakpoints();
+    require(executor.breakpoints(listed.data(), listed.size()) == 0U,
+            "clear_breakpoints left addresses behind");
+    require(amigaport::Executor::breakpoint_capacity() >= 1U,
+            "the reported breakpoint capacity is unusable");
+}
+
 int main(int argc, char **argv) {
     try {
         // These controlled failures exercise this executable's terminal error
@@ -458,6 +500,10 @@ int main(int argc, char **argv) {
             throw std::runtime_error("controlled standard exception");
         }
         if (argc == 2 && std::string_view(argv[1]) == "--exercise-unknown-failure") {
+            // Throwing a NON-exception type is the whole point here: it is what
+            // exercises main's catch-all boundary, which a std::exception would
+            // never reach.
+            // NOLINTNEXTLINE(bugprone-std-exception-baseclass)
             throw main_image;
         }
         if (argc != 1) {
@@ -477,6 +523,7 @@ int main(int argc, char **argv) {
         test_unterminated_native_override_fails_closed();
         test_native_continuation_reauthorizes_a_replaced_image();
         test_execution_trace_records_retired_instructions();
+        test_breakpoint_stops_before_the_instruction_and_resume_continues();
     } catch (const std::exception &error) {
         // Terminal test diagnostics must not throw while handling a failure.
         std::fputs("amigaport_tests: ", stderr);
@@ -488,7 +535,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    return std::puts("amigaport_tests: 11 scenarios passed") == EOF || std::fflush(stdout) == EOF
+    return std::puts("amigaport_tests: 12 scenarios passed") == EOF || std::fflush(stdout) == EOF
                ? EXIT_FAILURE
                : EXIT_SUCCESS;
 }

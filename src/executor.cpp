@@ -37,6 +37,72 @@ constexpr bool unpack_trace_entry(std::uint64_t packed, ExecutionTraceEntry &ent
 
 } // namespace
 
+/* Guest addresses the host wants execution to stop on.
+ *
+ * A debugger needs to stop the guest at an address without the host having to
+ * know which run will reach it. The set is checked once per instruction, so the
+ * common case — no breakpoints — must cost a single branch on a member already
+ * in cache; hence the `count_` fast path and a flat open-addressed table rather
+ * than a node-based container.
+ *
+ * A run never breaks on its FIRST instruction. Stopping before an address is
+ * executed is what makes a breakpoint useful, but it also means resuming would
+ * stop again immediately on the same address and never make progress. Skipping
+ * the first instruction of each run is what lets "continue" continue.
+ */
+class Breakpoints final {
+  public:
+    static constexpr std::size_t kCapacity = 64U;
+
+    [[nodiscard]] bool empty() const noexcept { return count_ == 0U; }
+    [[nodiscard]] std::size_t size() const noexcept { return count_; }
+
+    [[nodiscard]] bool contains(GuestAddress address) const noexcept {
+        for (std::size_t probe = 0U; probe < count_; ++probe) {
+            if (addresses_[probe] == address) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* False when the set is full, or the address is already in it. */
+    bool add(GuestAddress address) noexcept {
+        if (count_ >= kCapacity || contains(address)) {
+            return false;
+        }
+        addresses_[count_++] = address;
+        return true;
+    }
+
+    bool remove(GuestAddress address) noexcept {
+        for (std::size_t probe = 0U; probe < count_; ++probe) {
+            if (addresses_[probe] == address) {
+                addresses_[probe] = addresses_[--count_];
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void clear() noexcept { count_ = 0U; }
+
+    [[nodiscard]] std::size_t copy(GuestAddress *destination, std::size_t capacity) const noexcept {
+        if (destination == nullptr) {
+            return 0U;
+        }
+        const std::size_t wanted = std::min(capacity, count_);
+        for (std::size_t index = 0U; index < wanted; ++index) {
+            destination[index] = addresses_[index];
+        }
+        return wanted;
+    }
+
+  private:
+    std::array<GuestAddress, kCapacity> addresses_{};
+    std::size_t count_{0U};
+};
+
 class Executor::Impl final {
   public:
     struct SliceProgress final {
@@ -93,6 +159,12 @@ class Executor::Impl final {
             }
             if (stop_at_pc && cpu.pc == *stop_at_pc) {
                 return make_exit(ExitReason::ReturnToHost, progress);
+            }
+            /* See Breakpoints: never on the first instruction of a run, or
+             * resuming from a breakpoint could not make progress. */
+            if (!breakpoints.empty() && progress.instructions > 0U &&
+                breakpoints.contains(cpu.pc)) {
+                return make_exit(ExitReason::Breakpoint, progress);
             }
             const ExecutionIdentity current = identity();
             if (NativeOverride *function = overrides.find(current); function != nullptr) {
@@ -289,6 +361,7 @@ class Executor::Impl final {
     CpuState cpu{};
     ImageIdentity image{};
     detail::OverrideRegistry overrides;
+    Breakpoints breakpoints;
     detail::PuaeCore core;
     std::vector<ExecutionIdentity> active_overrides;
     std::array<std::atomic<std::uint64_t>, kExecutionTraceCapacity> trace{};
@@ -343,6 +416,18 @@ ExecutionExit Executor::execute(InstructionBudget instruction_budget) {
     }
     return impl_->run(instruction_budget.value);
 }
+
+bool Executor::set_breakpoint(GuestAddress address) { return impl_->breakpoints.add(address); }
+
+bool Executor::clear_breakpoint(GuestAddress address) { return impl_->breakpoints.remove(address); }
+
+void Executor::clear_breakpoints() { impl_->breakpoints.clear(); }
+
+std::size_t Executor::breakpoints(GuestAddress *destination, std::size_t capacity) const {
+    return impl_->breakpoints.copy(destination, capacity);
+}
+
+std::size_t Executor::breakpoint_capacity() noexcept { return Breakpoints::kCapacity; }
 
 ExecutionExit Executor::call(GuestAddress address, InstructionBudget instruction_budget) {
     impl_->cpu.pc = address;

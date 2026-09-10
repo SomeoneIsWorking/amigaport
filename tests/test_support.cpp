@@ -25,7 +25,10 @@ amigaport::MemoryRead<std::uint16_t> VectorMemory::read16(amigaport::GuestAddres
     if (!contains({.address = address, .width = 2U})) {
         return {.fault = amigaport::MemoryFault::Unmapped};
     }
-    return {.value = static_cast<std::uint16_t>((bytes_[address] << 8U) | bytes_[address + 1U])};
+    /* Widen before shifting: std::uint8_t promotes to int, so shifting it
+     * left is a signed bitwise operation. */
+    const auto high = static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes_[address]) << 8U);
+    return {.value = static_cast<std::uint16_t>(high | bytes_[address + 1U])};
 }
 
 amigaport::MemoryRead<std::uint32_t> VectorMemory::read32(amigaport::GuestAddress address) {
