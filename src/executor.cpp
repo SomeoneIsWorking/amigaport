@@ -164,6 +164,10 @@ class Executor::Impl final {
              * resuming from a breakpoint could not make progress. */
             if (!breakpoints.empty() && progress.instructions > 0U &&
                 breakpoints.contains(cpu.pc)) {
+                /* Observed here, on the address, before anything unwinds. */
+                if (breakpoint_handler) {
+                    breakpoint_handler(owner());
+                }
                 return make_exit(ExitReason::Breakpoint, progress);
             }
             const ExecutionIdentity current = identity();
@@ -362,6 +366,7 @@ class Executor::Impl final {
     ImageIdentity image{};
     detail::OverrideRegistry overrides;
     Breakpoints breakpoints;
+    BreakpointHandler breakpoint_handler;
     detail::PuaeCore core;
     std::vector<ExecutionIdentity> active_overrides;
     std::array<std::atomic<std::uint64_t>, kExecutionTraceCapacity> trace{};
@@ -428,6 +433,10 @@ std::size_t Executor::breakpoints(GuestAddress *destination, std::size_t capacit
 }
 
 std::size_t Executor::breakpoint_capacity() noexcept { return Breakpoints::kCapacity; }
+
+void Executor::set_breakpoint_handler(BreakpointHandler handler) {
+    impl_->breakpoint_handler = std::move(handler);
+}
 
 ExecutionExit Executor::call(GuestAddress address, InstructionBudget instruction_budget) {
     impl_->cpu.pc = address;

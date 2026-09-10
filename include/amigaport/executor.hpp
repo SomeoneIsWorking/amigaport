@@ -60,6 +60,11 @@ class Executor;
 
 using NativeOverride = std::function<ExecutionExit(Executor &)>;
 
+/* Called the instant a breakpoint is reached, while the CPU is still exactly
+ * on the address and nothing has unwound. The host inspects (or blocks) here;
+ * the run ends with ExitReason::Breakpoint once it returns. */
+using BreakpointHandler = std::function<void(Executor &)>;
+
 class Executor final {
   public:
     Executor(RuntimeConfig config, Memory &memory, Logger &logger);
@@ -91,6 +96,13 @@ class Executor final {
     void clear_breakpoints();
     [[nodiscard]] std::size_t breakpoints(GuestAddress *destination, std::size_t capacity) const;
     [[nodiscard]] static std::size_t breakpoint_capacity() noexcept;
+
+    /* Where a breakpoint is observed. Without a handler the hit is only
+     * reported through the exit, by which time the run has returned to its
+     * caller and — if the breakpoint was inside a nested call such as an
+     * interrupt delivery — the CPU has moved on. A host that wants the
+     * registers AT the address must set this. */
+    void set_breakpoint_handler(BreakpointHandler handler);
 
     [[nodiscard]] ExecutionExit execute(InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call(GuestAddress address,
