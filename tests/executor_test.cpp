@@ -483,6 +483,24 @@ void test_breakpoint_stops_before_the_instruction_and_resume_continues() {
             "resuming stopped on the breakpoint it had just reported");
     require(executor.state().data[2] == 9U, "resuming did not execute past the breakpoint");
 
+    /* A handler sees the CPU still ON the address, before anything unwinds. */
+    executor.clear_breakpoints();
+    require(executor.set_breakpoint(2), "a breakpoint for the handler was refused");
+    std::uint32_t observed_pc = 0xFFFFFFFFU;
+    executor.set_breakpoint_handler(
+        [&observed_pc](amigaport::Executor &stopped) { observed_pc = stopped.state().pc; });
+    executor.state().pc = 0;
+    executor.state().data[1] = 0;
+    const amigaport::ExecutionExit handled = executor.execute({.value = 8});
+    require(handled.reason == amigaport::ExitReason::Breakpoint,
+            "the handled breakpoint did not stop execution");
+    require(observed_pc == 2U, "the breakpoint handler did not see the CPU on the address");
+    require(executor.state().data[1] == 0U,
+            "the breakpoint handler ran after the instruction it stopped on");
+    executor.set_breakpoint_handler(nullptr);
+    executor.clear_breakpoints();
+    require(executor.set_breakpoint(4), "restoring the breakpoint for the clear checks failed");
+
     require(executor.clear_breakpoint(4), "clearing a set breakpoint reported nothing to clear");
     require(!executor.clear_breakpoint(4), "clearing an unset breakpoint reported success");
     executor.clear_breakpoints();
