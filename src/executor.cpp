@@ -456,6 +456,7 @@ ExecutionExit Executor::call(GuestAddress address, InstructionBudget instruction
         !impl_->active_overrides.empty() && impl_->active_overrides.back().address == address;
     std::optional<GuestAddress> stop_at_pc = std::nullopt;
     if (is_active) {
+        bool is_tail_jump = false;
         if (impl_->trace_written > 0) {
             ExecutionTraceEntry entered{};
             const uint64_t last_index = impl_->trace_written - 1;
@@ -463,12 +464,15 @@ ExecutionExit Executor::call(GuestAddress address, InstructionBudget instruction
                 impl_->trace[last_index % kExecutionTraceCapacity].load(std::memory_order_relaxed);
             if (unpack_trace_entry(packed, entered)) {
                 const uint16_t op = entered.opcode;
-                if ((op & 0xFF00) == 0x6100 || ((op & 0xFFC0) == 0x4E80 && (op & 0x0038) != 0)) {
-                    const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
-                    if (return_pc) {
-                        stop_at_pc = return_pc.value;
-                    }
+                if ((op & 0xFF00) == 0x6000 || (op & 0xFFC0) == 0x4EC0) {
+                    is_tail_jump = true;
                 }
+            }
+        }
+        if (!is_tail_jump) {
+            const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
+            if (return_pc && (return_pc.value & 1u) == 0u && return_pc.value != 0U) {
+                stop_at_pc = return_pc.value;
             }
         }
         detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
@@ -494,16 +498,7 @@ ExecutionExit Executor::call_original_subroutine(InstructionBudget instruction_b
     if (impl_->active_overrides.empty()) {
         throw std::logic_error("call_original_subroutine requires an active native override");
     }
-    impl_->synchronize_active_stack_pointer();
-    const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
-    if (!return_pc) {
-        ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
-        result.memory_fault = return_pc.fault;
-        return result;
-    }
-    detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
-                                                            impl_->active_overrides.back());
-    return impl_->run(instruction_budget.value, false, return_pc.value);
+    return call(impl_->active_overrides.back().address, instruction_budget);
 }
 
 } // namespace amigaport
