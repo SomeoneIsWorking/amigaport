@@ -9,7 +9,6 @@ Checks: >
   readability-qualified-auto
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/amigaport/(include|src|tests)/.*'
-ExcludeHeaderFilterRegex: '.*/third_party/.*'
 FormatStyle: file
 CheckOptions:
   - key: readability-braces-around-statements.ShortStatementLines
