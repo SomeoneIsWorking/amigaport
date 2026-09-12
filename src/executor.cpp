@@ -181,13 +181,18 @@ class Executor::Impl final {
                 return make_exit(ExitReason::Breakpoint, progress);
             }
             ExecutionIdentity current = identity();
-            if (NativeOverride *function = overrides.find(current); function != nullptr) {
-                ExecutionExit result = run_override(*function, current);
-                if (result.continue_execution) {
-                    authorized_generation = image.generation;
-                    continue;
+            bool original_once = pending_original == current;
+            if (original_once) {
+                pending_original.reset();
+            } else {
+                if (NativeOverride *function = overrides.find(current); function != nullptr) {
+                    ExecutionExit result = run_override(*function, current);
+                    if (result.continue_execution) {
+                        authorized_generation = image.generation;
+                        continue;
+                    }
+                    return result;
                 }
-                return result;
             }
 
             GuestAddress step_pc = cpu.pc;
@@ -380,6 +385,7 @@ class Executor::Impl final {
     BreakpointHandler breakpoint_handler;
     detail::PuaeCore core;
     std::vector<ExecutionIdentity> active_overrides;
+    std::optional<ExecutionIdentity> pending_original;
     std::array<std::atomic<std::uint64_t>, kExecutionTraceCapacity> trace{};
     std::atomic<std::uint64_t> trace_written{0};
     Executor *owner_pointer{};
@@ -421,6 +427,7 @@ ImageIdentity Executor::replace_image(ImageTag tag) {
         throw std::overflow_error("image generation exhausted");
     }
     impl_->image = {.tag = tag, .generation = impl_->image.generation + 1U};
+    impl_->pending_original.reset();
     return impl_->image;
 }
 
@@ -591,6 +598,23 @@ ExecutionExit Executor::call_original_subroutine(InstructionBudget instruction_b
     detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
                                                             impl_->active_overrides.back());
     return impl_->run(instruction_budget.value, false, return_pc.value);
+}
+
+ExecutionExit Executor::continue_original() {
+    if (impl_->active_overrides.empty()) {
+        throw std::logic_error("continue_original requires an active native override");
+    }
+    ExecutionIdentity current = impl_->active_overrides.back();
+    if (impl_->image != current.image || impl_->cpu.pc != current.address ||
+        impl_->pending_original.has_value()) {
+        throw std::logic_error("continue_original requires the current override PC");
+    }
+    impl_->pending_original = current;
+    ExecutionExit result{};
+    result.reason = ExitReason::NativeOverride;
+    result.continue_execution = true;
+    result.identity = current;
+    return result;
 }
 
 } // namespace amigaport

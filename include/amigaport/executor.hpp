@@ -137,6 +137,10 @@ class Executor final {
                                                InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call_original(InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call_original_subroutine(InstructionBudget instruction_budget = {});
+    /* A tail-entered native observer has no guest return to wait for. Resume
+     * the outer run at this PC, executing the original instruction once without
+     * selecting this override again. Later visits still select it normally. */
+    [[nodiscard]] ExecutionExit continue_original();
 
     /* Copy the most recently retired instructions, oldest first, into
      * `destination`. Lock-free and safe to call from a fatal signal handler or
