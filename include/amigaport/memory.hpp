@@ -17,7 +17,9 @@ template <typename T> struct MemoryRead final {
     T value{};
     MemoryFault fault{MemoryFault::None};
 
-    [[nodiscard]] explicit operator bool() const noexcept { return fault == MemoryFault::None; }
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return fault == MemoryFault::None;
+    }
 };
 
 template <typename T> struct MemoryWrite final {

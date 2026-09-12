@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from verification import ANDROID_PORT_REVISION
+from verification import ANDROID_PORT_REVISION, RE_HARNESS_REVISION
 
 
 class DependencyPinTests(unittest.TestCase):
@@ -30,6 +30,10 @@ class DependencyPinTests(unittest.TestCase):
     def test_android_checkout_matches_verifier_contract(self) -> None:
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn(f"ref: {ANDROID_PORT_REVISION}", workflow)
+
+    def test_shared_policy_checkouts_match_verifier_contract(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertEqual(workflow.count(f"ref: {RE_HARNESS_REVISION}"), 2)
 
 
 if __name__ == "__main__":

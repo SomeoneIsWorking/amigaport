@@ -41,6 +41,29 @@ class AndroidDeviceSelectionTests(unittest.TestCase):
 
 
 class NativeProfileTests(unittest.TestCase):
+    def test_cpp_policy_tool_requires_the_pinned_shared_revision(self) -> None:
+        wrong_revision = mock.Mock(returncode=0, stdout="different-revision\n")
+        with (
+            mock.patch.object(Path, "is_file", return_value=True),
+            mock.patch.object(verification.subprocess, "run", return_value=wrong_revision),
+            self.assertRaisesRegex(RuntimeError, "requires re-harness"),
+        ):
+            verification.cpp_policy_tool()
+
+    def test_cpp_policy_tool_accepts_the_pinned_shared_revision(self) -> None:
+        correct_revision = mock.Mock(
+            returncode=0, stdout=verification.RE_HARNESS_REVISION + "\n"
+        )
+        with (
+            mock.patch.object(Path, "is_file", return_value=True),
+            mock.patch.object(verification.subprocess, "run", return_value=correct_revision),
+        ):
+            resolved = verification.cpp_policy_tool()
+        self.assertEqual(
+            resolved,
+            verification.ROOT / "build" / "deps" / "re-harness" / "tools" / "cpp_policy.py",
+        )
+
     def test_macos_builds_with_appleclang_and_uses_its_cpp_headers(self) -> None:
         def tool(name: str) -> str:
             return str(Path("/opt/homebrew/opt/llvm@20/bin") / name)
@@ -141,6 +164,7 @@ class NativeProfileTests(unittest.TestCase):
             ),
             mock.patch.object(verification, "run"),
             mock.patch.object(verification, "lint") as lint,
+            mock.patch.object(verification, "audit_cpp_ownership") as ownership,
         ):
             verification.verify_native()
 
@@ -161,6 +185,9 @@ class NativeProfileTests(unittest.TestCase):
                 "--extra-arg-before=-nostdinc++",
                 "--extra-arg-before=-isystem/SDKs/MacOSX.sdk/usr/include/c++/v1",
             ),
+        )
+        ownership.assert_called_once_with(
+            verification.ROOT / "build" / "verify-macos-arm64-clang"
         )
 
 

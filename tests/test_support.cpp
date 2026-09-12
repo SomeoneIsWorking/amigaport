@@ -1,6 +1,9 @@
 #include "test_support.hpp"
 
-VectorMemory::VectorMemory(std::size_t size) : bytes_(size) {}
+namespace amigaport::test {
+
+VectorMemory::VectorMemory(std::size_t size) : bytes_(size) {
+}
 
 void VectorMemory::load16(amigaport::MemoryWrite<std::uint16_t> write) {
     bytes_.at(write.address) = static_cast<std::uint8_t>(write.value >> 8U);
@@ -27,13 +30,13 @@ amigaport::MemoryRead<std::uint16_t> VectorMemory::read16(amigaport::GuestAddres
     }
     /* Widen before shifting: std::uint8_t promotes to int, so shifting it
      * left is a signed bitwise operation. */
-    const auto high = static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes_[address]) << 8U);
+    auto high = static_cast<std::uint16_t>(static_cast<std::uint16_t>(bytes_[address]) << 8U);
     return {.value = static_cast<std::uint16_t>(high | bytes_[address + 1U])};
 }
 
 amigaport::MemoryRead<std::uint32_t> VectorMemory::read32(amigaport::GuestAddress address) {
-    const auto high = read16(address);
-    const auto low = read16(address + 2U);
+    auto high = read16(address);
+    auto low = read16(address + 2U);
     if (!high) {
         return {.fault = high.fault};
     }
@@ -67,9 +70,9 @@ amigaport::MemoryFault VectorMemory::write32(amigaport::MemoryWrite<std::uint32_
     if (!contains({.address = write.address, .width = 4U})) {
         return amigaport::MemoryFault::Unmapped;
     }
-    if (const auto fault = write16(
-            {.address = write.address, .value = static_cast<std::uint16_t>(write.value >> 16U)});
-        fault != amigaport::MemoryFault::None) {
+    auto fault = write16(
+        {.address = write.address, .value = static_cast<std::uint16_t>(write.value >> 16U)});
+    if (fault != amigaport::MemoryFault::None) {
         return fault;
     }
     return write16(
@@ -83,3 +86,5 @@ bool VectorMemory::contains(Range range) const noexcept {
 void RecordingLogger::write(amigaport::LogLevel, std::string_view, std::string_view) noexcept {
     ++write_count;
 }
+
+} // namespace amigaport::test

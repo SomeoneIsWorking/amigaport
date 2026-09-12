@@ -76,33 +76,35 @@ void export_state(CpuState &state, const uae_m68k_state &snapshot) {
 class PuaeCore::Impl final {
   public:
     Impl(Memory &memory_value, Logger &logger_value) : memory(memory_value), logger(logger_value) {
-        const uae_m68k_memory callbacks{.read = &read,
-                                        .write = &write,
-                                        .acknowledge_interrupt = nullptr,
-                                        .reset_devices = nullptr};
-        const uae_m68k_diagnostics diagnostics{.write = &write_log, .user = this};
+        uae_m68k_memory callbacks{.read = &read,
+                                  .write = &write,
+                                  .acknowledge_interrupt = nullptr,
+                                  .reset_devices = nullptr};
+        uae_m68k_diagnostics diagnostics{.write = &write_log, .user = this};
         context = uae_m68k_context_create(&callbacks, this, &diagnostics);
         if (context == nullptr) {
             throw std::runtime_error("PUAE 68000 context creation failed");
         }
     }
 
-    ~Impl() { uae_m68k_context_destroy(context); }
+    ~Impl() {
+        uae_m68k_context_destroy(context);
+    }
 
     static uae_m68k_memory_status read(void *user, const uae_m68k_read_request *request,
                                        std::uint32_t *value) {
         auto &self = *static_cast<Impl *>(user);
         if (request->width == 1U) {
-            const auto result = self.memory.read8(request->address);
+            auto result = self.memory.read8(request->address);
             *value = result.value;
             return export_fault(result.fault);
         }
         if (request->width == 2U) {
-            const auto result = self.memory.read16(request->address);
+            auto result = self.memory.read16(request->address);
             *value = result.value;
             return export_fault(result.fault);
         }
-        const auto result = self.memory.read32(request->address);
+        auto result = self.memory.read32(request->address);
         *value = result.value;
         return export_fault(result.fault);
     }
@@ -132,12 +134,15 @@ class PuaeCore::Impl final {
     uae_m68k_context *context{};
 };
 
-PuaeCore::PuaeCore(Memory &memory, Logger &logger) : impl_(new Impl(memory, logger)) {}
-PuaeCore::~PuaeCore() { delete impl_; }
+PuaeCore::PuaeCore(Memory &memory, Logger &logger) : impl_(new Impl(memory, logger)) {
+}
+PuaeCore::~PuaeCore() {
+    delete impl_;
+}
 
 CoreStep PuaeCore::step(CpuState &state) {
     auto snapshot = import_state(state);
-    const uae_m68k_step_result result = uae_m68k_step(impl_->context, &snapshot);
+    uae_m68k_step_result result = uae_m68k_step(impl_->context, &snapshot);
     export_state(state, snapshot);
     CoreStep::Status status = CoreStep::Status::Completed;
     if (result.status == UAE_M68K_STEP_MEMORY_FAULT) {

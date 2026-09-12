@@ -13,8 +13,12 @@ static_assert(std::is_trivially_copyable_v<amigaport::CpuState>);
 
 namespace {
 
-constexpr amigaport::ImageTag main_image{1};
-constexpr amigaport::ImageTag title_image{2};
+using amigaport::test::interrupt_level;
+using amigaport::test::interrupt_vector;
+using amigaport::test::main_image;
+using amigaport::test::RecordingLogger;
+using amigaport::test::title_image;
+using amigaport::test::VectorMemory;
 
 void require(bool condition, std::string_view message) {
     if (!condition) {
@@ -34,7 +38,7 @@ uae_m68k_memory_status raw_read(void *user, const uae_m68k_read_request *request
     auto &memory = *static_cast<RawMemory *>(user);
     if (memory.enter_nested) {
         memory.enter_nested = false;
-        const auto nested = uae_m68k_step(memory.nested_context, memory.nested_state);
+        auto nested = uae_m68k_step(memory.nested_context, memory.nested_state);
         if (nested.status != UAE_M68K_STEP_OK) {
             return UAE_M68K_MEMORY_UNMAPPED;
         }
@@ -75,7 +79,7 @@ void test_upstream_moveq_and_budget_exit() {
     require(executor.execute({.value = 1}).reason == amigaport::ExitReason::NoImage,
             "executor ran before an image was activated");
     executor.replace_image(main_image);
-    const auto result = executor.execute({.value = 2});
+    auto result = executor.execute({.value = 2});
 
     require(result.reason == amigaport::ExitReason::InstructionBudget, "budget exit missing");
     require(result.instructions == 2, "instruction denominator is wrong");
@@ -100,33 +104,33 @@ void test_image_qualified_override_and_original_call() {
     executor.state().address[7] = 0;
     executor.state().supervisor_stack_pointer = 0;
     executor.replace_image(main_image);
-    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     bool override_entered = false;
     executor.register_override(identity, [&](amigaport::Executor &runtime) {
         override_entered = true;
         return runtime.call_original({.value = 1});
     });
 
-    const auto overridden = executor.call(0, {.value = 1});
+    auto overridden = executor.call(0, {.value = 1});
     require(override_entered, "matching image-qualified override was not entered");
     require(overridden.reason == amigaport::ExitReason::NativeOverride, "override exit is untyped");
     require(executor.state().data[0] == 7U, "scoped original did not run upstream guest body");
 
     executor.state().data[0] = 0;
     executor.replace_image(title_image);
-    const auto replaced = executor.call(0, {.value = 1});
+    auto replaced = executor.call(0, {.value = 1});
     require(replaced.reason == amigaport::ExitReason::InstructionBudget,
             "stale-generation override remained active");
     require(executor.state().data[0] == 7U, "new image did not execute guest body");
 
-    const auto replacement_identity =
+    auto replacement_identity =
         amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     executor.register_override(replacement_identity, [&](amigaport::Executor &runtime) {
         return runtime.call_original({.value = 1});
     });
     executor.remove_override(replacement_identity);
     executor.state().data[0] = 0;
-    const auto removed = executor.call(0, {.value = 1});
+    auto removed = executor.call(0, {.value = 1});
     require(removed.reason == amigaport::ExitReason::InstructionBudget,
             "removed override remained active");
     require(executor.state().data[0] == 7U, "removed override blocked guest execution");
@@ -141,7 +145,7 @@ void test_native_override_can_continue_without_unwinding_guest_call() {
     executor.state().sr = 0x2000;
     executor.state().address[7] = 0;
     executor.replace_image(main_image);
-    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     executor.register_override(identity, [](amigaport::Executor &runtime) {
         runtime.state().pc = 2;
         runtime.state().prefetch_valid = false;
@@ -150,7 +154,7 @@ void test_native_override_can_continue_without_unwinding_guest_call() {
         return result;
     });
 
-    const auto result = executor.call(0, {.value = 1});
+    auto result = executor.call(0, {.value = 1});
     require(result.reason == amigaport::ExitReason::InstructionBudget,
             "native continuation did not stay inside the guest run");
     require(result.instructions == 1U, "native continuation changed guest instruction accounting");
@@ -171,9 +175,9 @@ void test_nested_call_dispatches_guest_and_stops_at_its_caller_return() {
     executor.state().supervisor_stack_pointer = 0x80;
     executor.replace_image(main_image);
 
-    const auto entry = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    auto entry = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     executor.register_override(entry, [&](amigaport::Executor &runtime) {
-        const auto nested = runtime.call(0x20, {.value = 4});
+        auto nested = runtime.call(0x20, {.value = 4});
         require(nested.reason == amigaport::ExitReason::ReturnToHost,
                 "nested guest call did not stop at its guest return");
         require(runtime.state().pc == 0x40U, "nested guest call crossed its return boundary");
@@ -182,7 +186,7 @@ void test_nested_call_dispatches_guest_and_stops_at_its_caller_return() {
         return result;
     });
 
-    const auto result = executor.call(0, {.value = 1});
+    auto result = executor.call(0, {.value = 1});
     require(result.reason == amigaport::ExitReason::InstructionBudget,
             "outer native call did not resume after nested guest call");
     require(executor.state().data[0] == 7U, "nested guest call did not execute its body");
@@ -199,9 +203,9 @@ void test_explicit_tail_transfer_does_not_consume_guest_stack() {
     executor.state().sr = 0x2700;
     executor.state().address[7] = 0;
     executor.replace_image(main_image);
-    const auto entry = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    auto entry = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     executor.register_override(entry, [&](amigaport::Executor &runtime) {
-        const auto nested = runtime.call(0x20, amigaport::CallBoundary::TailTransfer, {.value = 1});
+        auto nested = runtime.call(0x20, amigaport::CallBoundary::TailTransfer, {.value = 1});
         require(nested.reason == amigaport::ExitReason::InstructionBudget,
                 "explicit tail transfer did not remain in the guest run");
         require(runtime.state().pc == 0x22U, "explicit tail transfer did not advance the guest PC");
@@ -210,7 +214,7 @@ void test_explicit_tail_transfer_does_not_consume_guest_stack() {
         return result;
     });
 
-    const auto result = executor.call(0, {.value = 1});
+    auto result = executor.call(0, {.value = 1});
     require(result.reason == amigaport::ExitReason::InstructionBudget,
             "outer native call did not resume after the tail transfer");
     require(executor.state().data[0] == 7U, "tail transfer did not execute its target");
@@ -229,12 +233,12 @@ void test_host_subroutine_dispatches_override_and_preserves_caller_stack() {
     executor.state().supervisor_stack_pointer = 0x80;
     executor.replace_image(main_image);
 
-    const auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
-    const auto callee = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x20};
+    auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
+    auto callee = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x20};
     std::uint32_t callee_hits = 0;
     executor.register_override(callee, [&](amigaport::Executor &runtime) {
         ++callee_hits;
-        const auto return_pc = memory.read32(runtime.state().address[7]);
+        auto return_pc = memory.read32(runtime.state().address[7]);
         require(return_pc && return_pc.value == 0x40U,
                 "host call did not provide the callee's return address");
         runtime.state().address[7] += 4U;
@@ -243,11 +247,11 @@ void test_host_subroutine_dispatches_override_and_preserves_caller_stack() {
     });
     executor.register_override(caller, [&](amigaport::Executor &runtime) {
         amigaport::CallContinuation continuation{};
-        const auto first = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
-                                        &continuation);
+        auto first = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
+                                  &continuation);
         require(first.reason == amigaport::ExitReason::NativeOverride,
                 "native callee did not return a bounded override exit");
-        const auto result = runtime.continue_call(continuation, {.value = 1});
+        auto result = runtime.continue_call(continuation, {.value = 1});
         require(result.reason == amigaport::ExitReason::ReturnToHost,
                 "host call did not stop when the native callee returned");
         require(runtime.state().pc == 0x40U, "host call crossed its caller boundary");
@@ -256,7 +260,7 @@ void test_host_subroutine_dispatches_override_and_preserves_caller_stack() {
         return amigaport::ExecutionExit{.hand_off_to_host = true};
     });
 
-    const auto result = executor.call(0x40, {.value = 1});
+    auto result = executor.call(0x40, {.value = 1});
     require(result.reason == amigaport::ExitReason::ReturnToHost, "caller did not hand off");
     require(callee_hits == 1U, "native callee was not dispatched exactly once");
 }
@@ -273,7 +277,7 @@ void test_host_subroutine_dispatches_guest_and_rejects_unterminated_override() {
     executor.state().address[7] = 0x80;
     executor.state().supervisor_stack_pointer = 0x80;
     executor.replace_image(main_image);
-    const auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
+    auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
     executor.register_override(caller, [&](amigaport::Executor &runtime) {
         amigaport::CallContinuation continuation{};
         auto guest = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
@@ -288,16 +292,18 @@ void test_host_subroutine_dispatches_guest_and_rejects_unterminated_override() {
         require(runtime.state().data[0] == 7U, "host call did not execute the guest callee");
         require(runtime.state().address[7] == 0x80U, "guest callee stole caller return");
         runtime.register_override({.image = runtime.image(), .address = 0x20},
-                                  [](amigaport::Executor &) { return amigaport::ExecutionExit{}; });
+                                  [](amigaport::Executor &) {
+                                      return amigaport::ExecutionExit{};
+                                  });
         amigaport::CallContinuation invalid_continuation{};
-        const auto invalid = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine,
-                                          {.value = 1}, &invalid_continuation);
+        auto invalid = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
+                                    &invalid_continuation);
         require(invalid.reason == amigaport::ExitReason::UnterminatedNativeOverride,
                 "unchanged nested override PC did not fail closed");
         return amigaport::ExecutionExit{.hand_off_to_host = true};
     });
 
-    const auto result = executor.call(0x40, {.value = 1});
+    auto result = executor.call(0x40, {.value = 1});
     require(result.reason == amigaport::ExitReason::ReturnToHost, "caller did not hand off");
 }
 
@@ -309,11 +315,11 @@ void test_host_subroutine_stack_fault_preserves_caller_state() {
     executor.state().address[7] = 2;
     executor.state().supervisor_stack_pointer = 2;
     executor.replace_image(main_image);
-    const auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
+    auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
     executor.register_override(caller, [&](amigaport::Executor &runtime) {
         amigaport::CallContinuation continuation{};
-        const auto fault = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
-                                        &continuation);
+        auto fault = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
+                                  &continuation);
         require(fault.reason == amigaport::ExitReason::MemoryFault,
                 "insufficient stack was not rejected");
         require(!continuation.valid, "a faulted call published a continuation token");
@@ -335,13 +341,13 @@ void test_native_stack_view_reconciles_before_guest_reentry() {
     executor.state().address[7] = 0;
     executor.state().supervisor_stack_pointer = 0;
     executor.replace_image(main_image);
-    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     executor.register_override(identity, [&](amigaport::Executor &runtime) {
         runtime.state().address[7] = 0x80;
         return runtime.call_original({.value = 1});
     });
 
-    const auto result = executor.call(0, {.value = 1});
+    auto result = executor.call(0, {.value = 1});
     require(result.reason == amigaport::ExitReason::NativeOverride,
             "stack-view override did not return through its native boundary");
     require(executor.state().supervisor_stack_pointer == 0x80U,
@@ -362,12 +368,12 @@ void test_original_subroutine_returns_at_guest_rts() {
     executor.state().address[7] = 0x80;
     executor.state().supervisor_stack_pointer = 0x80;
     executor.replace_image(main_image);
-    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     executor.register_override(identity, [&](amigaport::Executor &runtime) {
         return runtime.call_original_subroutine({.value = 4});
     });
 
-    const auto result = executor.call(0, {.value = 4});
+    auto result = executor.call(0, {.value = 4});
     require(result.reason == amigaport::ExitReason::NativeOverride,
             "original subroutine override did not return through native boundary");
     require(result.instructions == 2U, "original subroutine instruction count is wrong");
@@ -390,7 +396,7 @@ void test_interrupt_call_returns_through_guest_rte() {
     executor.state().supervisor_stack_pointer = 0x180;
     executor.replace_image(main_image);
 
-    const auto result = executor.call_interrupt(0x100, {.value = 4});
+    auto result = executor.call_interrupt(0x100, {.value = 4});
     require(result.reason == amigaport::ExitReason::ReturnToHost,
             "interrupt call did not stop at guest RTE");
     require(result.instructions == 2U, "interrupt call instruction count is wrong");
@@ -414,7 +420,7 @@ void test_memory_branch_and_prefetch_paths() {
     executor.state().sr = 0x2700;
     executor.state().address[0] = 0x40;
     executor.replace_image(main_image);
-    const auto result = executor.execute({.value = 3});
+    auto result = executor.execute({.value = 3});
 
     require(result.reason == amigaport::ExitReason::InstructionBudget,
             "mixed memory/branch slice did not reach its bound");
@@ -430,11 +436,10 @@ void test_memory_branch_and_prefetch_paths() {
 void test_interrupt_entry_is_not_an_executed_instruction() {
     VectorMemory memory(512);
     RecordingLogger logger;
-    constexpr std::uint8_t interrupt_level = 3;
-    constexpr std::uint8_t vector = 24 + interrupt_level;
     memory.load16({.address = 0, .value = 0x4E71});
     memory.load16({.address = 2, .value = 0x4E71});
-    memory.load32({.address = static_cast<amigaport::GuestAddress>(vector) * 4U, .value = 0xC0U});
+    memory.load32(
+        {.address = static_cast<amigaport::GuestAddress>(interrupt_vector) * 4U, .value = 0xC0U});
     memory.load16({.address = 0xC0, .value = 0x4E71});
     memory.load16({.address = 0xC2, .value = 0x4E71});
 
@@ -445,7 +450,7 @@ void test_interrupt_entry_is_not_an_executed_instruction() {
     executor.state().pending_interrupt_level = interrupt_level;
     executor.state().stopped = true;
     executor.replace_image(main_image);
-    const auto result = executor.execute({.value = 1});
+    auto result = executor.execute({.value = 1});
 
     require(result.reason == amigaport::ExitReason::Exception, "interrupt did not exit by type");
     require(!executor.state().stopped, "accepted interrupt did not wake a stopped CPU");
@@ -469,7 +474,7 @@ void test_precise_unsupported_and_memory_fault_exits() {
     executor.state().address[7] = 0x70;
     executor.state().supervisor_stack_pointer = 0x70;
     executor.replace_image(main_image);
-    const auto exception = executor.execute({.value = 1});
+    auto exception = executor.execute({.value = 1});
     require(exception.reason == amigaport::ExitReason::Exception,
             "illegal opcode did not enter its exception vector");
     require(exception.instructions == 1, "exception instruction denominator is wrong");
@@ -485,7 +490,7 @@ void test_precise_unsupported_and_memory_fault_exits() {
 
     executor.state().pc = 5;
     executor.state().prefetch_valid = false;
-    const auto invalid_state = [&]() {
+    auto invalid_state = [&]() {
         try {
             static_cast<void>(executor.execute({.value = 1}));
             return false;
@@ -497,7 +502,7 @@ void test_precise_unsupported_and_memory_fault_exits() {
 
     executor.state().pc = 256;
     executor.state().prefetch_valid = false;
-    const auto fault = executor.execute({.value = 1});
+    auto fault = executor.execute({.value = 1});
     require(fault.reason == amigaport::ExitReason::MemoryFault, "unmapped fetch did not exit");
     require(fault.memory_fault == amigaport::MemoryFault::Unmapped, "memory fault lost its reason");
     require(executor.state().exception.active_vector == amigaport::ExceptionVector::BusError,
@@ -506,7 +511,7 @@ void test_precise_unsupported_and_memory_fault_exits() {
 
     executor.state().pc = 0;
     executor.state().halted = true;
-    const auto halted = executor.execute({.value = 1});
+    auto halted = executor.execute({.value = 1});
     require(halted.reason == amigaport::ExitReason::Halted, "halted CPU executed guest code");
 }
 
@@ -524,10 +529,10 @@ void test_nested_context_execution_is_isolated() {
     raw_load16(outer_memory, {.address = 0, .value = 0x7003});
     raw_load16(outer_memory, {.address = 2, .value = 0x4E71});
     raw_load16(outer_memory, {.address = 4, .value = 0x4E71});
-    const uae_m68k_memory callbacks{.read = &raw_read,
-                                    .write = &raw_write,
-                                    .acknowledge_interrupt = nullptr,
-                                    .reset_devices = nullptr};
+    uae_m68k_memory callbacks{.read = &raw_read,
+                              .write = &raw_write,
+                              .acknowledge_interrupt = nullptr,
+                              .reset_devices = nullptr};
     uae_m68k_context *inner = uae_m68k_context_create(&callbacks, &inner_memory, nullptr);
     uae_m68k_context *outer = uae_m68k_context_create(&callbacks, &outer_memory, nullptr);
     require(inner != nullptr && outer != nullptr, "fork contexts could not be created");
@@ -537,7 +542,7 @@ void test_nested_context_execution_is_isolated() {
     outer_memory.nested_context = inner;
     outer_memory.nested_state = &inner_state;
     outer_memory.enter_nested = true;
-    const auto outer_result = uae_m68k_step(outer, &outer_state);
+    auto outer_result = uae_m68k_step(outer, &outer_state);
 
     require(outer_result.status == UAE_M68K_STEP_OK, "outer reentrant step failed");
     require(outer_state.data[0] == 3U, "outer context register state was corrupted");
@@ -548,8 +553,6 @@ void test_nested_context_execution_is_isolated() {
     uae_m68k_context_destroy(inner);
 }
 
-} // namespace
-
 void test_unterminated_native_override_fails_closed() {
     VectorMemory memory(16);
     RecordingLogger logger;
@@ -558,12 +561,12 @@ void test_unterminated_native_override_fails_closed() {
     executor.state().sr = 0x2000;
     executor.state().address[7] = 0;
     executor.replace_image(main_image);
-    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     executor.register_override(identity, [](amigaport::Executor &) {
         return amigaport::ExecutionExit{}; // completes no boundary at all
     });
 
-    const auto result = executor.call(0, {.value = 4});
+    auto result = executor.call(0, {.value = 4});
     require(result.reason == amigaport::ExitReason::UnterminatedNativeOverride,
             "an override that completed no boundary did not fail closed");
     require(result.identity.address == 0U, "unterminated override exit lost its address");
@@ -578,7 +581,7 @@ void test_native_continuation_reauthorizes_a_replaced_image() {
     executor.state().sr = 0x2000;
     executor.state().address[7] = 0;
     executor.replace_image(main_image);
-    const auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    auto identity = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
     executor.register_override(identity, [](amigaport::Executor &runtime) {
         runtime.replace_image({.value = 9});
         runtime.state().pc = 2;
@@ -588,7 +591,7 @@ void test_native_continuation_reauthorizes_a_replaced_image() {
         return result;
     });
 
-    const auto result = executor.call(0, {.value = 1});
+    auto result = executor.call(0, {.value = 1});
     require(result.reason == amigaport::ExitReason::InstructionBudget,
             "an override that replaced the image and continued did not keep running");
     require(executor.state().data[0] == 7U,
@@ -608,7 +611,7 @@ void test_execution_trace_records_retired_instructions() {
     (void)executor.call(0, {.value = 2});
 
     std::array<amigaport::ExecutionTraceEntry, 4> entries{};
-    const std::size_t count = executor.recent_execution(entries.data(), entries.size());
+    std::size_t count = executor.recent_execution(entries.data(), entries.size());
     require(count == 2U, "the execution trace did not record both retired instructions");
     require(entries[0].pc == 0U && entries[0].opcode == 0x7007U,
             "the execution trace lost the first retired instruction");
@@ -637,7 +640,7 @@ void test_breakpoint_stops_before_the_instruction_and_resume_continues() {
             "the breakpoint set did not report exactly one address");
     require(listed[0] == 4U, "the breakpoint set reported the wrong address");
 
-    const amigaport::ExecutionExit stopped = executor.execute({.value = 8});
+    amigaport::ExecutionExit stopped = executor.execute({.value = 8});
     require(stopped.reason == amigaport::ExitReason::Breakpoint,
             "execution did not stop on the breakpoint");
     require(executor.state().pc == 4U, "the breakpoint ran the instruction it stopped on");
@@ -646,7 +649,7 @@ void test_breakpoint_stops_before_the_instruction_and_resume_continues() {
 
     /* Resuming must make progress rather than stop on the same address again:
      * a run never breaks on its own first instruction. */
-    const amigaport::ExecutionExit resumed = executor.execute({.value = 8});
+    amigaport::ExecutionExit resumed = executor.execute({.value = 8});
     require(resumed.reason != amigaport::ExitReason::Breakpoint,
             "resuming stopped on the breakpoint it had just reported");
     require(executor.state().data[2] == 9U, "resuming did not execute past the breakpoint");
@@ -655,11 +658,12 @@ void test_breakpoint_stops_before_the_instruction_and_resume_continues() {
     executor.clear_breakpoints();
     require(executor.set_breakpoint(2), "a breakpoint for the handler was refused");
     std::uint32_t observed_pc = 0xFFFFFFFFU;
-    executor.set_breakpoint_handler(
-        [&observed_pc](amigaport::Executor &stopped) { observed_pc = stopped.state().pc; });
+    executor.set_breakpoint_handler([&observed_pc](amigaport::Executor &stopped) {
+        observed_pc = stopped.state().pc;
+    });
     executor.state().pc = 0;
     executor.state().data[1] = 0;
-    const amigaport::ExecutionExit handled = executor.execute({.value = 8});
+    amigaport::ExecutionExit handled = executor.execute({.value = 8});
     require(handled.reason == amigaport::ExitReason::Breakpoint,
             "the handled breakpoint did not stop execution");
     require(observed_pc == 2U, "the breakpoint handler did not see the CPU on the address");
@@ -677,6 +681,8 @@ void test_breakpoint_stops_before_the_instruction_and_resume_continues() {
     require(amigaport::Executor::breakpoint_capacity() >= 1U,
             "the reported breakpoint capacity is unusable");
 }
+
+} // namespace
 
 int main(int argc, char **argv) {
     try {

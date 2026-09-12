@@ -1,11 +1,16 @@
 Checks: >
-  -*,
-  bugprone-*,
+  clang-diagnostic-*,
   clang-analyzer-*,
-  modernize-use-nullptr,
+  bugprone-*,
   performance-*,
+  modernize-use-nullptr,
   readability-avoid-const-params-in-decls,
+  readability-braces-around-statements,
   readability-qualified-auto
 WarningsAsErrors: '*'
-HeaderFilterRegex: '^(include|src|tests)/'
+HeaderFilterRegex: '.*/amigaport/(include|src|tests)/.*'
+ExcludeHeaderFilterRegex: '.*/third_party/.*'
 FormatStyle: file
+CheckOptions:
+  - key: readability-braces-around-statements.ShortStatementLines
+    value: '0'

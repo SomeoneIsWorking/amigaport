@@ -54,8 +54,12 @@ class Breakpoints final {
   public:
     static constexpr std::size_t kCapacity = 64U;
 
-    [[nodiscard]] bool empty() const noexcept { return count_ == 0U; }
-    [[nodiscard]] std::size_t size() const noexcept { return count_; }
+    [[nodiscard]] bool empty() const noexcept {
+        return count_ == 0U;
+    }
+    [[nodiscard]] std::size_t size() const noexcept {
+        return count_;
+    }
 
     [[nodiscard]] bool contains(GuestAddress address) const noexcept {
         for (std::size_t probe = 0U; probe < count_; ++probe) {
@@ -85,13 +89,15 @@ class Breakpoints final {
         return false;
     }
 
-    void clear() noexcept { count_ = 0U; }
+    void clear() noexcept {
+        count_ = 0U;
+    }
 
     [[nodiscard]] std::size_t copy(GuestAddress *destination, std::size_t capacity) const noexcept {
         if (destination == nullptr) {
             return 0U;
         }
-        const std::size_t wanted = std::min(capacity, count_);
+        std::size_t wanted = std::min(capacity, count_);
         for (std::size_t index = 0U; index < wanted; ++index) {
             destination[index] = addresses_[index];
         }
@@ -129,7 +135,9 @@ class Executor::Impl final {
             impl_.active_overrides.push_back(identity);
         }
 
-        ~ActiveOverrideScope() { impl_.active_overrides.pop_back(); }
+        ~ActiveOverrideScope() {
+            impl_.active_overrides.pop_back();
+        }
 
         ActiveOverrideScope(const ActiveOverrideScope &) = delete;
         ActiveOverrideScope &operator=(const ActiveOverrideScope &) = delete;
@@ -141,8 +149,8 @@ class Executor::Impl final {
 
     [[nodiscard]] ExecutionExit run(std::uint32_t requested_budget, bool stop_on_rte = false,
                                     std::optional<GuestAddress> stop_at_pc = std::nullopt) {
-        const std::uint32_t budget =
-            requested_budget == 0U ? config.max_instructions_per_slice
+        std::uint32_t budget = requested_budget == 0U
+                                   ? config.max_instructions_per_slice
                                    : std::min(requested_budget, config.max_instructions_per_slice);
         /* The run is authorized for the image it started in; a replacement from
          * anywhere else must end it. A native override that replaces the image
@@ -172,7 +180,7 @@ class Executor::Impl final {
                 }
                 return make_exit(ExitReason::Breakpoint, progress);
             }
-            const ExecutionIdentity current = identity();
+            ExecutionIdentity current = identity();
             if (NativeOverride *function = overrides.find(current); function != nullptr) {
                 ExecutionExit result = run_override(*function, current);
                 if (result.continue_execution) {
@@ -182,8 +190,8 @@ class Executor::Impl final {
                 return result;
             }
 
-            const GuestAddress step_pc = cpu.pc;
-            const detail::CoreStep step = core.step(cpu);
+            GuestAddress step_pc = cpu.pc;
+            detail::CoreStep step = core.step(cpu);
             record_execution(step_pc, step.instruction_word);
             if (step.status == detail::CoreStep::Status::MemoryFault) {
                 logger.write(LogLevel::Error, "cpu", "68000 memory access failed");
@@ -269,32 +277,31 @@ class Executor::Impl final {
     [[nodiscard]] ExecutionExit call_interrupt(GuestAddress address,
                                                InstructionBudget instruction_budget) {
         synchronize_active_stack_pointer();
-        const CpuState saved_state = cpu;
+        CpuState saved_state = cpu;
         if (saved_state.supervisor_stack_pointer < 6U) {
             return make_exit(ExitReason::MemoryFault, {});
         }
 
-        const GuestAddress frame_address = saved_state.supervisor_stack_pointer - 6U;
-        const auto saved_frame_sr = memory.read16(frame_address);
-        const auto saved_frame_pc = memory.read32(frame_address + 2U);
+        GuestAddress frame_address = saved_state.supervisor_stack_pointer - 6U;
+        auto saved_frame_sr = memory.read16(frame_address);
+        auto saved_frame_pc = memory.read32(frame_address + 2U);
         if (!saved_frame_sr || !saved_frame_pc) {
             ExecutionExit result = make_exit(ExitReason::MemoryFault, {});
             result.memory_fault = !saved_frame_sr ? saved_frame_sr.fault : saved_frame_pc.fault;
             return result;
         }
 
-        const auto restore_frame = [&]() {
+        auto restore_frame = [&]() {
             (void)memory.write16({.address = frame_address, .value = saved_frame_sr.value});
             (void)memory.write32({.address = frame_address + 2U, .value = saved_frame_pc.value});
         };
-        const auto frame_sr_fault = memory.write16({.address = frame_address, .value = cpu.sr});
+        auto frame_sr_fault = memory.write16({.address = frame_address, .value = cpu.sr});
         if (frame_sr_fault != MemoryFault::None) {
             ExecutionExit result = make_exit(ExitReason::MemoryFault, {});
             result.memory_fault = frame_sr_fault;
             return result;
         }
-        const auto frame_pc_fault =
-            memory.write32({.address = frame_address + 2U, .value = cpu.pc});
+        auto frame_pc_fault = memory.write32({.address = frame_address + 2U, .value = cpu.pc});
         if (frame_pc_fault != MemoryFault::None) {
             restore_frame();
             ExecutionExit result = make_exit(ExitReason::MemoryFault, {});
@@ -307,13 +314,13 @@ class Executor::Impl final {
         cpu.sr = static_cast<std::uint16_t>(saved_state.sr | 0x2000U);
         cpu.pc = address;
         cpu.prefetch_valid = false;
-        const auto result = run(instruction_budget.value, true);
+        auto result = run(instruction_budget.value, true);
         if (result.reason != ExitReason::ReturnToHost) {
             /* Architectural state rolls back, but guest TIME does not: those
              * cycles were really spent, and a host that derives the video beam
              * from this counter must not see them un-happen. Carry the counter
              * across the restore. */
-            const std::uint64_t spent = cpu.elapsed_cycles;
+            std::uint64_t spent = cpu.elapsed_cycles;
             cpu = saved_state;
             cpu.elapsed_cycles = spent;
             restore_frame();
@@ -329,7 +336,7 @@ class Executor::Impl final {
     }
 
     void record_execution(GuestAddress pc, std::uint16_t opcode) noexcept {
-        const std::uint64_t index = trace_written.load(std::memory_order_relaxed);
+        std::uint64_t index = trace_written.load(std::memory_order_relaxed);
         trace[index % kExecutionTraceCapacity].store(pack_trace_entry(pc, opcode, image.tag.value),
                                                      std::memory_order_relaxed);
         trace_written.store(index + 1U, std::memory_order_relaxed);
@@ -340,12 +347,12 @@ class Executor::Impl final {
         if (destination == nullptr || capacity == 0U) {
             return 0U;
         }
-        const std::uint64_t written = trace_written.load(std::memory_order_relaxed);
-        const std::uint64_t available = std::min<std::uint64_t>(written, kExecutionTraceCapacity);
-        const std::uint64_t wanted = std::min<std::uint64_t>(available, capacity);
+        std::uint64_t written = trace_written.load(std::memory_order_relaxed);
+        std::uint64_t available = std::min<std::uint64_t>(written, kExecutionTraceCapacity);
+        std::uint64_t wanted = std::min<std::uint64_t>(available, capacity);
         std::size_t count = 0U;
         for (std::uint64_t offset = wanted; offset > 0U; --offset) {
-            const std::uint64_t packed =
+            std::uint64_t packed =
                 trace[(written - offset) % kExecutionTraceCapacity].load(std::memory_order_relaxed);
             if (unpack_trace_entry(packed, destination[count])) {
                 ++count;
@@ -355,7 +362,7 @@ class Executor::Impl final {
     }
 
     void synchronize_active_stack_pointer() noexcept {
-        const bool supervisor = (cpu.sr & 0x2000U) != 0U;
+        bool supervisor = (cpu.sr & 0x2000U) != 0U;
         if (supervisor) {
             cpu.supervisor_stack_pointer = cpu.address[7];
         } else {
@@ -387,16 +394,24 @@ void Executor::ImplDeleter::operator()(Impl *implementation) const noexcept {
     delete implementation;
 }
 
-CpuState &Executor::state() noexcept { return impl_->cpu; }
-const CpuState &Executor::state() const noexcept { return impl_->cpu; }
-ImageIdentity Executor::image() const noexcept { return impl_->image; }
+CpuState &Executor::state() noexcept {
+    return impl_->cpu;
+}
+const CpuState &Executor::state() const noexcept {
+    return impl_->cpu;
+}
+ImageIdentity Executor::image() const noexcept {
+    return impl_->image;
+}
 
 std::size_t Executor::recent_execution(ExecutionTraceEntry *destination,
                                        std::size_t capacity) const noexcept {
     return impl_->copy_recent_execution(destination, capacity);
 }
 
-std::size_t Executor::recent_execution_capacity() noexcept { return kExecutionTraceCapacity; }
+std::size_t Executor::recent_execution_capacity() noexcept {
+    return kExecutionTraceCapacity;
+}
 
 ImageIdentity Executor::replace_image(ImageTag tag) {
     if (tag.value == 0U) {
@@ -413,7 +428,9 @@ void Executor::register_override(ExecutionIdentity identity, NativeOverride func
     impl_->overrides.install(identity, std::move(function));
 }
 
-void Executor::remove_override(ExecutionIdentity identity) { impl_->overrides.remove(identity); }
+void Executor::remove_override(ExecutionIdentity identity) {
+    impl_->overrides.remove(identity);
+}
 
 ExecutionExit Executor::execute(InstructionBudget instruction_budget) {
     if (impl_->image.tag.value == 0U) {
@@ -426,17 +443,25 @@ ExecutionExit Executor::execute(InstructionBudget instruction_budget) {
     return impl_->run(instruction_budget.value);
 }
 
-bool Executor::set_breakpoint(GuestAddress address) { return impl_->breakpoints.add(address); }
+bool Executor::set_breakpoint(GuestAddress address) {
+    return impl_->breakpoints.add(address);
+}
 
-bool Executor::clear_breakpoint(GuestAddress address) { return impl_->breakpoints.remove(address); }
+bool Executor::clear_breakpoint(GuestAddress address) {
+    return impl_->breakpoints.remove(address);
+}
 
-void Executor::clear_breakpoints() { impl_->breakpoints.clear(); }
+void Executor::clear_breakpoints() {
+    impl_->breakpoints.clear();
+}
 
 std::size_t Executor::breakpoints(GuestAddress *destination, std::size_t capacity) const {
     return impl_->breakpoints.copy(destination, capacity);
 }
 
-std::size_t Executor::breakpoint_capacity() noexcept { return Breakpoints::kCapacity; }
+std::size_t Executor::breakpoint_capacity() noexcept {
+    return Breakpoints::kCapacity;
+}
 
 void Executor::set_breakpoint_handler(BreakpointHandler handler) {
     impl_->breakpoint_handler = std::move(handler);
@@ -467,14 +492,14 @@ ExecutionExit Executor::call(GuestAddress address, CallBoundary boundary,
 
     std::optional<GuestAddress> stop_at_pc = std::nullopt;
     if (!impl_->active_overrides.empty() && boundary == CallBoundary::HostSubroutine) {
-        const GuestAddress return_pc = impl_->cpu.pc;
-        const GuestAddress stack_pointer = impl_->cpu.address[7];
+        GuestAddress return_pc = impl_->cpu.pc;
+        GuestAddress stack_pointer = impl_->cpu.address[7];
         if (stack_pointer < 4U) {
             ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
             result.memory_fault = MemoryFault::Unmapped;
             return result;
         }
-        const MemoryFault fault =
+        MemoryFault fault =
             impl_->memory.write32({.address = stack_pointer - 4U, .value = return_pc});
         if (fault != MemoryFault::None) {
             ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
@@ -484,7 +509,7 @@ ExecutionExit Executor::call(GuestAddress address, CallBoundary boundary,
         impl_->cpu.address[7] = stack_pointer - 4U;
         stop_at_pc = return_pc;
     } else if (!impl_->active_overrides.empty() && boundary == CallBoundary::GuestSubroutine) {
-        const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
+        auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
         if (!return_pc) {
             ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
             result.memory_fault = return_pc.fault;
@@ -557,7 +582,7 @@ ExecutionExit Executor::call_original_subroutine(InstructionBudget instruction_b
         throw std::logic_error("call_original_subroutine requires an active native override");
     }
     impl_->synchronize_active_stack_pointer();
-    const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
+    auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
     if (!return_pc) {
         ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
         result.memory_fault = return_pc.fault;
