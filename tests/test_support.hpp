@@ -7,6 +7,13 @@
 #include <string_view>
 #include <vector>
 
+namespace amigaport::test {
+
+inline constexpr ImageTag main_image{1};
+inline constexpr ImageTag title_image{2};
+inline constexpr std::uint8_t interrupt_level = 3;
+inline constexpr std::uint8_t interrupt_vector = 24 + interrupt_level;
+
 class VectorMemory final : public amigaport::Memory {
   public:
     explicit VectorMemory(std::size_t size);
@@ -44,3 +51,5 @@ class RecordingLogger final : public amigaport::Logger {
 
     std::size_t write_count{};
 };
+
+} // namespace amigaport::test

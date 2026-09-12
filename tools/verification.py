@@ -23,6 +23,7 @@ from llvm_tools import (
 from source_policy import ROOT, iter_sources
 
 ANDROID_PORT_REVISION = "3079116e84ea4f581ae4bc42e8219df52ece16d7"
+RE_HARNESS_REVISION = "0e8184f2d0f99f0a13b96c9a453cad45c2b3cea2"
 ANDROID_NDK_VERSION = "28.2.13676358"
 ANDROID_ABIS = ("x86_64", "arm64-v8a")
 
@@ -42,7 +43,7 @@ class NativeProfile:
 
 
 def run(
-    command: list[str], *, capture: bool = False
+    command: list[str], *, capture: bool = False, environment: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
     print(f"$ {shlex.join(command)}", flush=True)
     return subprocess.run(
@@ -51,6 +52,29 @@ def run(
         check=True,
         capture_output=capture,
         text=True,
+        env=environment,
+    )
+
+
+def cpp_policy_tool() -> Path:
+    candidates = (ROOT / "build" / "deps" / "re-harness", ROOT.parent / "re-harness")
+    attempted: list[str] = []
+    for checkout in candidates:
+        tool = checkout / "tools" / "cpp_policy.py"
+        if not tool.is_file():
+            attempted.append(f"{tool}: missing")
+            continue
+        revision = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if revision.returncode == 0 and revision.stdout.strip() == RE_HARNESS_REVISION:
+            return tool
+        attempted.append(f"{tool}: revision {revision.stdout.strip() or 'unavailable'}")
+    raise RuntimeError(
+        f"shared C++ policy tool requires re-harness {RE_HARNESS_REVISION}; tried "
+        + "; ".join(attempted)
     )
 
 
@@ -139,7 +163,14 @@ def translation_units() -> list[str]:
     ]
 
 
-def common_checks(formatter: str | None = None) -> None:
+def common_checks(formatter: str | None = None, linter: str | None = None) -> None:
+    formatter = formatter or find_llvm_tool("clang-format")
+    linter = linter or find_llvm_tool("clang-tidy")
+    audit_environment = dict(os.environ, CLANG_FORMAT=formatter, CLANG_TIDY=linter)
+    run(
+        [sys.executable, str(cpp_policy_tool()), "--audit-config", str(ROOT)],
+        environment=audit_environment,
+    )
     run([sys.executable, str(ROOT / "tools" / "policy.py")])
     run([sys.executable, str(ROOT / "tests" / "test_dependency_pins.py")])
     run([sys.executable, str(ROOT / "tests" / "test_source_policy.py")])
@@ -149,7 +180,7 @@ def common_checks(formatter: str | None = None) -> None:
     run([sys.executable, str(ROOT / "tests" / "test_verification.py")])
     run(
         [
-            formatter or find_llvm_tool("clang-format"),
+            formatter,
             "--dry-run",
             "--Werror",
             *first_party_native_sources(),
@@ -205,10 +236,25 @@ def lint(
     )
 
 
+def audit_cpp_ownership(build_dir: Path) -> None:
+    run(
+        [
+            sys.executable,
+            str(cpp_policy_tool()),
+            "--root",
+            str(ROOT),
+            "--compile-commands",
+            str(build_dir / "compile_commands.json"),
+            "--exclude",
+            "third_party",
+        ]
+    )
+
+
 def verify_native() -> None:
     profile = native_profile()
     build_dir = ROOT / "build" / f"verify-{profile.name}"
-    common_checks(profile.formatter)
+    common_checks(profile.formatter, profile.linter)
     configure_arguments = [
         f"-DCMAKE_C_COMPILER={profile.c_compiler}",
         f"-DCMAKE_CXX_COMPILER={profile.cxx_compiler}",
@@ -232,6 +278,7 @@ def verify_native() -> None:
             for directory in profile.cpp_include_dirs
         )
     lint(build_dir, profile.linter, lint_arguments)
+    audit_cpp_ownership(build_dir)
 
 
 def resolve_android_port(explicit: Path | None) -> Path:
@@ -353,4 +400,5 @@ def verify_android(android_port_dir: Path | None, serial: str) -> None:
         contract.ndk_cxx_shared_library(ndk, abi)
         build_directories[abi], executables[abi] = android_build(ndk, abi, api)
     lint(build_directories["x86_64"])
+    audit_cpp_ownership(build_directories["x86_64"])
     run_android_test(contract, executables["x86_64"], serial)

@@ -30,6 +30,8 @@ struct ExceptionState final {
 };
 
 struct CpuState final {
+    static constexpr std::uint16_t reserved_status_bits = 0x58E0U;
+
     std::array<std::uint32_t, 8> data{};
     std::array<std::uint32_t, 8> address{};
     GuestAddress pc{};
