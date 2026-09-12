@@ -60,6 +60,10 @@ instruction differential evidence against a full PUAE oracle remain unverified.
 Evidence: focused tests prove a matching generation enters a native override, its scoped original
 subroutine executes the upstream guest body through guest RTS without recursion, an interrupt call
 returns through guest RTE, and an image replacement makes the old key stale.
+Host-owned subroutine tests also prove that native and guest callees preserve
+the caller's return across bounded override/instruction-budget exits, and an
+unterminated nested override fails closed. Title-level gameplay parity remains
+the consuming project's evidence, not a framework test result.
 
 ### S004 — Bounded exits
 
