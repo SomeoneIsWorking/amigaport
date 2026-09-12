@@ -216,6 +216,115 @@ void test_explicit_tail_transfer_does_not_consume_guest_stack() {
     require(executor.state().data[0] == 7U, "tail transfer did not execute its target");
 }
 
+void test_host_subroutine_dispatches_override_and_preserves_caller_stack() {
+    VectorMemory memory(256);
+    RecordingLogger logger;
+    memory.load16({.address = 0x20, .value = 0x4E71}); // overridden NOP
+    memory.load16({.address = 0x40, .value = 0x4E71}); // caller NOP
+    memory.load32({.address = 0x80, .value = 0x60});   // caller's guest return
+
+    amigaport::Executor executor({.max_instructions_per_slice = 1}, memory, logger);
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 0x80;
+    executor.state().supervisor_stack_pointer = 0x80;
+    executor.replace_image(main_image);
+
+    const auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
+    const auto callee = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x20};
+    std::uint32_t callee_hits = 0;
+    executor.register_override(callee, [&](amigaport::Executor &runtime) {
+        ++callee_hits;
+        const auto return_pc = memory.read32(runtime.state().address[7]);
+        require(return_pc && return_pc.value == 0x40U,
+                "host call did not provide the callee's return address");
+        runtime.state().address[7] += 4U;
+        runtime.state().pc = return_pc.value;
+        return amigaport::ExecutionExit{};
+    });
+    executor.register_override(caller, [&](amigaport::Executor &runtime) {
+        amigaport::CallContinuation continuation{};
+        const auto first = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
+                                        &continuation);
+        require(first.reason == amigaport::ExitReason::NativeOverride,
+                "native callee did not return a bounded override exit");
+        const auto result = runtime.continue_call(continuation, {.value = 1});
+        require(result.reason == amigaport::ExitReason::ReturnToHost,
+                "host call did not stop when the native callee returned");
+        require(runtime.state().pc == 0x40U, "host call crossed its caller boundary");
+        require(runtime.state().address[7] == 0x80U, "host call consumed the caller's return");
+        require(memory.read32(0x80).value == 0x60U, "host call changed caller stack contents");
+        return amigaport::ExecutionExit{.hand_off_to_host = true};
+    });
+
+    const auto result = executor.call(0x40, {.value = 1});
+    require(result.reason == amigaport::ExitReason::ReturnToHost, "caller did not hand off");
+    require(callee_hits == 1U, "native callee was not dispatched exactly once");
+}
+
+void test_host_subroutine_dispatches_guest_and_rejects_unterminated_override() {
+    VectorMemory memory(256);
+    RecordingLogger logger;
+    memory.load16({.address = 0x20, .value = 0x7007}); // MOVEQ #7,D0
+    memory.load16({.address = 0x22, .value = 0x4E75}); // RTS
+    memory.load32({.address = 0x80, .value = 0x60});
+
+    amigaport::Executor executor({.max_instructions_per_slice = 1}, memory, logger);
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 0x80;
+    executor.state().supervisor_stack_pointer = 0x80;
+    executor.replace_image(main_image);
+    const auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
+    executor.register_override(caller, [&](amigaport::Executor &runtime) {
+        amigaport::CallContinuation continuation{};
+        auto guest = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
+                                  &continuation);
+        require(guest.reason == amigaport::ExitReason::InstructionBudget,
+                "guest callee exceeded its first bounded slice");
+        while (guest.reason == amigaport::ExitReason::InstructionBudget) {
+            guest = runtime.continue_call(continuation, {.value = 1});
+        }
+        require(guest.reason == amigaport::ExitReason::ReturnToHost,
+                "host call did not preserve its return boundary across slices");
+        require(runtime.state().data[0] == 7U, "host call did not execute the guest callee");
+        require(runtime.state().address[7] == 0x80U, "guest callee stole caller return");
+        runtime.register_override({.image = runtime.image(), .address = 0x20},
+                                  [](amigaport::Executor &) { return amigaport::ExecutionExit{}; });
+        amigaport::CallContinuation invalid_continuation{};
+        const auto invalid = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine,
+                                          {.value = 1}, &invalid_continuation);
+        require(invalid.reason == amigaport::ExitReason::UnterminatedNativeOverride,
+                "unchanged nested override PC did not fail closed");
+        return amigaport::ExecutionExit{.hand_off_to_host = true};
+    });
+
+    const auto result = executor.call(0x40, {.value = 1});
+    require(result.reason == amigaport::ExitReason::ReturnToHost, "caller did not hand off");
+}
+
+void test_host_subroutine_stack_fault_preserves_caller_state() {
+    VectorMemory memory(64);
+    RecordingLogger logger;
+    amigaport::Executor executor({.max_instructions_per_slice = 1}, memory, logger);
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 2;
+    executor.state().supervisor_stack_pointer = 2;
+    executor.replace_image(main_image);
+    const auto caller = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0x40};
+    executor.register_override(caller, [&](amigaport::Executor &runtime) {
+        amigaport::CallContinuation continuation{};
+        const auto fault = runtime.call(0x20, amigaport::CallBoundary::HostSubroutine, {.value = 1},
+                                        &continuation);
+        require(fault.reason == amigaport::ExitReason::MemoryFault,
+                "insufficient stack was not rejected");
+        require(!continuation.valid, "a faulted call published a continuation token");
+        require(runtime.state().pc == 0x40U, "stack fault changed caller PC");
+        require(runtime.state().address[7] == 2U, "stack fault changed caller A7");
+        return amigaport::ExecutionExit{.hand_off_to_host = true};
+    });
+    require(executor.call(0x40, {.value = 1}).reason == amigaport::ExitReason::ReturnToHost,
+            "caller did not hand off after stack fault");
+}
+
 void test_native_stack_view_reconciles_before_guest_reentry() {
     VectorMemory memory(16);
     RecordingLogger logger;
@@ -591,6 +700,9 @@ int main(int argc, char **argv) {
         test_native_override_can_continue_without_unwinding_guest_call();
         test_nested_call_dispatches_guest_and_stops_at_its_caller_return();
         test_explicit_tail_transfer_does_not_consume_guest_stack();
+        test_host_subroutine_dispatches_override_and_preserves_caller_stack();
+        test_host_subroutine_dispatches_guest_and_rejects_unterminated_override();
+        test_host_subroutine_stack_fault_preserves_caller_state();
         test_native_stack_view_reconciles_before_guest_reentry();
         test_original_subroutine_returns_at_guest_rts();
         test_interrupt_call_returns_through_guest_rte();
@@ -614,7 +726,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    return std::puts("amigaport_tests: 13 scenarios passed") == EOF || std::fflush(stdout) == EOF
+    return std::puts("amigaport_tests: 20 scenarios passed") == EOF || std::fflush(stdout) == EOF
                ? EXIT_FAILURE
                : EXIT_SUCCESS;
 }

@@ -30,12 +30,22 @@ enum class ExitReason : std::uint8_t {
     Breakpoint,
 };
 
-/* A host call enters guest code without pushing a synthetic return address.
- * The consumer therefore states whether the current guest stack already owns
- * a subroutine return or whether the target is a tail transfer. */
+/* A nested call either uses the guest's existing return, makes an explicit
+ * tail transfer, or creates a new subroutine frame owned by the host caller. */
 enum class CallBoundary : std::uint8_t {
     GuestSubroutine,
     TailTransfer,
+    HostSubroutine,
+};
+
+/* A nested call's return boundary survives bounded execution slices. The
+ * caller keeps this token until ReturnToHost or another terminal exit. */
+struct CallContinuation final {
+    CallBoundary boundary{CallBoundary::TailTransfer};
+    GuestAddress return_pc{};
+    ImageIdentity image{};
+    ExecutionIdentity owner{};
+    bool valid{};
 };
 
 struct ExecutionExit final {
@@ -115,8 +125,14 @@ class Executor final {
     [[nodiscard]] ExecutionExit execute(InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call(GuestAddress address,
                                      InstructionBudget instruction_budget = {});
+    /* HostSubroutine requires `continuation` and pushes a synthetic return
+     * address. Every call remains bounded; resume after a budget, override,
+     * or breakpoint exit with continue_call until ReturnToHost. */
     [[nodiscard]] ExecutionExit call(GuestAddress address, CallBoundary boundary,
-                                     InstructionBudget instruction_budget = {});
+                                     InstructionBudget instruction_budget = {},
+                                     CallContinuation *continuation = nullptr);
+    [[nodiscard]] ExecutionExit continue_call(const CallContinuation &continuation,
+                                              InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call_interrupt(GuestAddress address,
                                                InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call_original(InstructionBudget instruction_budget = {});

@@ -245,12 +245,9 @@ class Executor::Impl final {
             result.reason = ExitReason::ReturnToHost;
             return result;
         }
-        /* A native override reached from guest code must complete its own
-         * guest boundary.  A nested override reached by another native body
-         * is different: its host callback is the call boundary, so its PC may
-         * legitimately remain on the overridden address while control returns
-         * to the outer native body. */
-        if (cpu.pc == current.address && active_overrides.size() == 1U) {
+        /* Every override must complete its guest boundary. A nested host
+         * subroutine has its own synthetic return on A7. */
+        if (cpu.pc == current.address) {
             logger.write(LogLevel::Error, "executor",
                          "native override returned without completing its guest boundary");
             result = make_exit(ExitReason::UnterminatedNativeOverride, {});
@@ -450,20 +447,43 @@ ExecutionExit Executor::call(GuestAddress address, InstructionBudget instruction
 }
 
 ExecutionExit Executor::call(GuestAddress address, CallBoundary boundary,
-                             InstructionBudget instruction_budget) {
+                             InstructionBudget instruction_budget, CallContinuation *continuation) {
+    if (continuation != nullptr) {
+        *continuation = {};
+    }
     if (impl_->image.tag.value == 0U) {
         return impl_->make_exit(ExitReason::NoImage, {});
+    }
+    if (boundary == CallBoundary::HostSubroutine && impl_->active_overrides.empty()) {
+        throw std::logic_error("host subroutine requires an active native override");
+    }
+    if (boundary == CallBoundary::HostSubroutine && continuation == nullptr) {
+        throw std::invalid_argument("host subroutine requires a continuation token");
     }
     impl_->synchronize_active_stack_pointer();
     if (!cpu_state_is_valid(impl_->cpu)) {
         throw std::invalid_argument("CPU state is not a valid 68000 architectural state");
     }
 
-    impl_->cpu.pc = address;
-    impl_->cpu.prefetch_valid = false;
-
     std::optional<GuestAddress> stop_at_pc = std::nullopt;
-    if (!impl_->active_overrides.empty() && boundary == CallBoundary::GuestSubroutine) {
+    if (!impl_->active_overrides.empty() && boundary == CallBoundary::HostSubroutine) {
+        const GuestAddress return_pc = impl_->cpu.pc;
+        const GuestAddress stack_pointer = impl_->cpu.address[7];
+        if (stack_pointer < 4U) {
+            ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
+            result.memory_fault = MemoryFault::Unmapped;
+            return result;
+        }
+        const MemoryFault fault =
+            impl_->memory.write32({.address = stack_pointer - 4U, .value = return_pc});
+        if (fault != MemoryFault::None) {
+            ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
+            result.memory_fault = fault;
+            return result;
+        }
+        impl_->cpu.address[7] = stack_pointer - 4U;
+        stop_at_pc = return_pc;
+    } else if (!impl_->active_overrides.empty() && boundary == CallBoundary::GuestSubroutine) {
         const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
         if (!return_pc) {
             ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
@@ -472,13 +492,50 @@ ExecutionExit Executor::call(GuestAddress address, CallBoundary boundary,
         }
         stop_at_pc = return_pc.value;
     }
+    impl_->cpu.pc = address;
+    impl_->cpu.prefetch_valid = false;
+    if (continuation != nullptr) {
+        *continuation = {.boundary = boundary,
+                         .return_pc = stop_at_pc.value_or(0U),
+                         .image = impl_->image,
+                         .owner = impl_->active_overrides.empty() ? ExecutionIdentity{}
+                                                                  : impl_->active_overrides.back(),
+                         .valid = stop_at_pc.has_value()};
+    }
     if (!impl_->active_overrides.empty()) {
+        if (boundary == CallBoundary::HostSubroutine) {
+            return impl_->run(instruction_budget.value, false, stop_at_pc);
+        }
         detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
                                                                 impl_->active_overrides.back());
         return impl_->run(instruction_budget.value, false, stop_at_pc);
     }
 
     return impl_->run(instruction_budget.value);
+}
+
+ExecutionExit Executor::continue_call(const CallContinuation &continuation,
+                                      InstructionBudget instruction_budget) {
+    if (!continuation.valid || continuation.boundary == CallBoundary::TailTransfer ||
+        impl_->active_overrides.empty()) {
+        throw std::invalid_argument("no active subroutine call to continue");
+    }
+    if (continuation.image != impl_->image) {
+        return impl_->make_exit(ExitReason::ImageReplaced, {});
+    }
+    if (continuation.owner != impl_->active_overrides.back()) {
+        throw std::logic_error("call continuation belongs to another native override");
+    }
+    impl_->synchronize_active_stack_pointer();
+    if (!cpu_state_is_valid(impl_->cpu)) {
+        throw std::invalid_argument("CPU state is not a valid 68000 architectural state");
+    }
+    if (continuation.boundary == CallBoundary::GuestSubroutine) {
+        detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
+                                                                impl_->active_overrides.back());
+        return impl_->run(instruction_budget.value, false, continuation.return_pc);
+    }
+    return impl_->run(instruction_budget.value, false, continuation.return_pc);
 }
 
 ExecutionExit Executor::call_interrupt(GuestAddress address, InstructionBudget instruction_budget) {
