@@ -245,7 +245,12 @@ class Executor::Impl final {
             result.reason = ExitReason::ReturnToHost;
             return result;
         }
-        if (cpu.pc == current.address) {
+        /* A native override reached from guest code must complete its own
+         * guest boundary.  A nested override reached by another native body
+         * is different: its host callback is the call boundary, so its PC may
+         * legitimately remain on the overridden address while control returns
+         * to the outer native body. */
+        if (cpu.pc == current.address && active_overrides.size() == 1U) {
             logger.write(LogLevel::Error, "executor",
                          "native override returned without completing its guest boundary");
             result = make_exit(ExitReason::UnterminatedNativeOverride, {});
@@ -441,6 +446,11 @@ void Executor::set_breakpoint_handler(BreakpointHandler handler) {
 }
 
 ExecutionExit Executor::call(GuestAddress address, InstructionBudget instruction_budget) {
+    return call(address, CallBoundary::GuestSubroutine, instruction_budget);
+}
+
+ExecutionExit Executor::call(GuestAddress address, CallBoundary boundary,
+                             InstructionBudget instruction_budget) {
     if (impl_->image.tag.value == 0U) {
         return impl_->make_exit(ExitReason::NoImage, {});
     }
@@ -452,29 +462,17 @@ ExecutionExit Executor::call(GuestAddress address, InstructionBudget instruction
     impl_->cpu.pc = address;
     impl_->cpu.prefetch_valid = false;
 
-    const bool is_active =
-        !impl_->active_overrides.empty() && impl_->active_overrides.back().address == address;
     std::optional<GuestAddress> stop_at_pc = std::nullopt;
-    if (is_active) {
-        bool is_tail_jump = false;
-        if (impl_->trace_written > 0) {
-            ExecutionTraceEntry entered{};
-            const uint64_t last_index = impl_->trace_written - 1;
-            const uint64_t packed =
-                impl_->trace[last_index % kExecutionTraceCapacity].load(std::memory_order_relaxed);
-            if (unpack_trace_entry(packed, entered)) {
-                const uint16_t op = entered.opcode;
-                if ((op & 0xFF00) == 0x6000 || (op & 0xFFC0) == 0x4EC0) {
-                    is_tail_jump = true;
-                }
-            }
+    if (!impl_->active_overrides.empty() && boundary == CallBoundary::GuestSubroutine) {
+        const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
+        if (!return_pc) {
+            ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
+            result.memory_fault = return_pc.fault;
+            return result;
         }
-        if (!is_tail_jump) {
-            const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
-            if (return_pc && (return_pc.value & 1u) == 0u && return_pc.value != 0U) {
-                stop_at_pc = return_pc.value;
-            }
-        }
+        stop_at_pc = return_pc.value;
+    }
+    if (!impl_->active_overrides.empty()) {
         detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
                                                                 impl_->active_overrides.back());
         return impl_->run(instruction_budget.value, false, stop_at_pc);
@@ -491,14 +489,26 @@ ExecutionExit Executor::call_original(InstructionBudget instruction_budget) {
     if (impl_->active_overrides.empty()) {
         throw std::logic_error("call_original requires an active native override");
     }
-    return call(impl_->active_overrides.back().address, instruction_budget);
+    detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
+                                                            impl_->active_overrides.back());
+    impl_->synchronize_active_stack_pointer();
+    return impl_->run(instruction_budget.value);
 }
 
 ExecutionExit Executor::call_original_subroutine(InstructionBudget instruction_budget) {
     if (impl_->active_overrides.empty()) {
         throw std::logic_error("call_original_subroutine requires an active native override");
     }
-    return call(impl_->active_overrides.back().address, instruction_budget);
+    impl_->synchronize_active_stack_pointer();
+    const auto return_pc = impl_->memory.read32(impl_->cpu.address[7]);
+    if (!return_pc) {
+        ExecutionExit result = impl_->make_exit(ExitReason::MemoryFault, {});
+        result.memory_fault = return_pc.fault;
+        return result;
+    }
+    detail::OverrideRegistry::ScopedSuppression suppression(impl_->overrides,
+                                                            impl_->active_overrides.back());
+    return impl_->run(instruction_budget.value, false, return_pc.value);
 }
 
 } // namespace amigaport
