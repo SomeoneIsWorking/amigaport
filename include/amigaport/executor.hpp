@@ -30,6 +30,14 @@ enum class ExitReason : std::uint8_t {
     Breakpoint,
 };
 
+/* A host call enters guest code without pushing a synthetic return address.
+ * The consumer therefore states whether the current guest stack already owns
+ * a subroutine return or whether the target is a tail transfer. */
+enum class CallBoundary : std::uint8_t {
+    GuestSubroutine,
+    TailTransfer,
+};
+
 struct ExecutionExit final {
     ExitReason reason{ExitReason::InstructionBudget};
     // A native callback changed the current CPU PC and asks the active run to
@@ -106,6 +114,8 @@ class Executor final {
 
     [[nodiscard]] ExecutionExit execute(InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call(GuestAddress address,
+                                     InstructionBudget instruction_budget = {});
+    [[nodiscard]] ExecutionExit call(GuestAddress address, CallBoundary boundary,
                                      InstructionBudget instruction_budget = {});
     [[nodiscard]] ExecutionExit call_interrupt(GuestAddress address,
                                                InstructionBudget instruction_budget = {});

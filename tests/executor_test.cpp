@@ -157,6 +157,65 @@ void test_native_override_can_continue_without_unwinding_guest_call() {
     require(executor.state().data[0] == 7U, "native continuation did not execute its target");
 }
 
+void test_nested_call_dispatches_guest_and_stops_at_its_caller_return() {
+    VectorMemory memory(256);
+    RecordingLogger logger;
+    memory.load16({.address = 0x20, .value = 0x7007}); // MOVEQ #7,D0
+    memory.load16({.address = 0x22, .value = 0x4E75}); // RTS
+    memory.load16({.address = 0x40, .value = 0x4E71}); // NOP after the native call
+    memory.load32({.address = 0x80, .value = 0x40});
+
+    amigaport::Executor executor({.max_instructions_per_slice = 8}, memory, logger);
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 0x80;
+    executor.state().supervisor_stack_pointer = 0x80;
+    executor.replace_image(main_image);
+
+    const auto entry = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    executor.register_override(entry, [&](amigaport::Executor &runtime) {
+        const auto nested = runtime.call(0x20, {.value = 4});
+        require(nested.reason == amigaport::ExitReason::ReturnToHost,
+                "nested guest call did not stop at its guest return");
+        require(runtime.state().pc == 0x40U, "nested guest call crossed its return boundary");
+        amigaport::ExecutionExit result{};
+        result.continue_execution = true;
+        return result;
+    });
+
+    const auto result = executor.call(0, {.value = 1});
+    require(result.reason == amigaport::ExitReason::InstructionBudget,
+            "outer native call did not resume after nested guest call");
+    require(executor.state().data[0] == 7U, "nested guest call did not execute its body");
+    require(executor.state().address[7] == 0x84U,
+            "nested guest call did not consume its guest return address");
+}
+
+void test_explicit_tail_transfer_does_not_consume_guest_stack() {
+    VectorMemory memory(256);
+    RecordingLogger logger;
+    memory.load16({.address = 0x20, .value = 0x7007}); // MOVEQ #7,D0
+
+    amigaport::Executor executor({.max_instructions_per_slice = 4}, memory, logger);
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 0;
+    executor.replace_image(main_image);
+    const auto entry = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    executor.register_override(entry, [&](amigaport::Executor &runtime) {
+        const auto nested = runtime.call(0x20, amigaport::CallBoundary::TailTransfer, {.value = 1});
+        require(nested.reason == amigaport::ExitReason::InstructionBudget,
+                "explicit tail transfer did not remain in the guest run");
+        require(runtime.state().pc == 0x22U, "explicit tail transfer did not advance the guest PC");
+        amigaport::ExecutionExit result{};
+        result.continue_execution = true;
+        return result;
+    });
+
+    const auto result = executor.call(0, {.value = 1});
+    require(result.reason == amigaport::ExitReason::InstructionBudget,
+            "outer native call did not resume after the tail transfer");
+    require(executor.state().data[0] == 7U, "tail transfer did not execute its target");
+}
+
 void test_native_stack_view_reconciles_before_guest_reentry() {
     VectorMemory memory(16);
     RecordingLogger logger;
@@ -530,6 +589,8 @@ int main(int argc, char **argv) {
         test_upstream_moveq_and_budget_exit();
         test_image_qualified_override_and_original_call();
         test_native_override_can_continue_without_unwinding_guest_call();
+        test_nested_call_dispatches_guest_and_stops_at_its_caller_return();
+        test_explicit_tail_transfer_does_not_consume_guest_stack();
         test_native_stack_view_reconciles_before_guest_reentry();
         test_original_subroutine_returns_at_guest_rts();
         test_interrupt_call_returns_through_guest_rte();
@@ -553,7 +614,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    return std::puts("amigaport_tests: 12 scenarios passed") == EOF || std::fflush(stdout) == EOF
+    return std::puts("amigaport_tests: 13 scenarios passed") == EOF || std::fflush(stdout) == EOF
                ? EXIT_FAILURE
                : EXIT_SUCCESS;
 }
