@@ -220,6 +220,44 @@ void test_explicit_tail_transfer_does_not_consume_guest_stack() {
     require(executor.state().data[0] == 7U, "tail transfer did not execute its target");
 }
 
+void test_tail_observer_continues_original_once_in_outer_run() {
+    VectorMemory memory(256);
+    RecordingLogger logger;
+    memory.load16({.address = 0, .value = 0x7007}); // MOVEQ #7,D0
+    memory.load16({.address = 2, .value = 0x60FC}); // BRA back to the override
+
+    amigaport::Executor executor({.max_instructions_per_slice = 8}, memory, logger);
+    executor.state().sr = 0x2700;
+    executor.state().address[7] = 0x80;
+    executor.replace_image(main_image);
+    auto entry = amigaport::ExecutionIdentity{.image = executor.image(), .address = 0};
+    unsigned visits = 0;
+    executor.register_override(entry, [&](amigaport::Executor &runtime) {
+        ++visits;
+        if (visits == 1U) {
+            return runtime.continue_original();
+        }
+        amigaport::ExecutionExit result{};
+        result.hand_off_to_host = true;
+        return result;
+    });
+
+    auto result = executor.execute();
+    require(result.reason == amigaport::ExitReason::ReturnToHost,
+            "tail observer did not hand control back after the next visit");
+    require(visits == 2U, "original bypass was not limited to one instruction");
+    require(executor.state().data[0] == 7U, "original instruction did not execute");
+    require(executor.state().address[7] == 0x80U, "tail observer changed the guest stack");
+
+    bool rejected = false;
+    try {
+        (void)executor.continue_original();
+    } catch (const std::logic_error &) {
+        rejected = true;
+    }
+    require(rejected, "continue_original accepted a call outside an override");
+}
+
 void test_host_subroutine_dispatches_override_and_preserves_caller_stack() {
     VectorMemory memory(256);
     RecordingLogger logger;
@@ -706,6 +744,7 @@ int main(int argc, char **argv) {
         test_native_override_can_continue_without_unwinding_guest_call();
         test_nested_call_dispatches_guest_and_stops_at_its_caller_return();
         test_explicit_tail_transfer_does_not_consume_guest_stack();
+        test_tail_observer_continues_original_once_in_outer_run();
         test_host_subroutine_dispatches_override_and_preserves_caller_stack();
         test_host_subroutine_dispatches_guest_and_rejects_unterminated_override();
         test_host_subroutine_stack_fault_preserves_caller_state();
@@ -732,7 +771,7 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    return std::puts("amigaport_tests: 20 scenarios passed") == EOF || std::fflush(stdout) == EOF
+    return std::puts("amigaport_tests: 21 scenarios passed") == EOF || std::fflush(stdout) == EOF
                ? EXIT_FAILURE
                : EXIT_SUCCESS;
 }
