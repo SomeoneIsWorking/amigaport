@@ -121,7 +121,7 @@ exception boundary. Terminal test reports now use nonthrowing stdio, success out
 test, and controlled standard/unknown exceptions must produce ordinary failure exits.
 
 Evidence: [hosted run 33961881866](https://github.com/SomeoneIsWorking/amigaport/actions/runs/33961881866)
-at main commit `e8f2e30757f27c39621805370fff75d74eb5b939` passed the complete Windows
+at main commit `1c66f95295f355ee42c9c7ac8818ba2d1c25062a` passed the complete Windows
 synthetic runtime, linked-symbol, formatting, lint, and terminal-failure regression gate. The same
 run passed Linux x86-64, Apple Silicon macOS, and Android cross-build/x86-64 emulator jobs. This is
 asset-free framework evidence; representative gameplay and Android arm64-v8a execution remain the

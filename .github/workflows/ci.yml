@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: SomeoneIsWorking/re-harness
-          ref: 0e8184f2d0f99f0a13b96c9a453cad45c2b3cea2
+          ref: f566a7dbde4c178a85067ad4e47c71f132b69496
           path: build/deps/re-harness
           fetch-depth: 0
           persist-credentials: false
@@ -59,14 +59,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: SomeoneIsWorking/re-harness
-          ref: 0e8184f2d0f99f0a13b96c9a453cad45c2b3cea2
+          ref: f566a7dbde4c178a85067ad4e47c71f132b69496
           path: build/deps/re-harness
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: SomeoneIsWorking/android-port
-          ref: 3079116e84ea4f581ae4bc42e8219df52ece16d7
+          ref: cc2951dbf597ddea093a8119e6f281da7a0ffc8c
           path: build/deps/android-port
           fetch-depth: 0
           persist-credentials: false
