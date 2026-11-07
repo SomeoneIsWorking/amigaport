@@ -40,3 +40,5 @@ The pinned CPU source is `SomeoneIsWorking/libretro-uae` revision
 `1f2e0a209fa3a147dfe7b2ab4fdb05ab80a7a495`, licensed under GPL-2.0. Linking its CPU handlers makes
 the distributed combined work subject to GPL-2.0. The dependency's libretro frontend and Amiga
 device emulator are not linked into the runtime library.
+
+Built with AI assistance (Claude and other LLMs).
