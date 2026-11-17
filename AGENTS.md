@@ -19,3 +19,5 @@ module map: `docs/project-goals.md`, `docs/project-state.md`, `docs/codemap.md`.
   tools/verify.py`). Android verification consumes the pinned `shared/android-port` contract.
 - Keep modules cohesive and below 1,200 lines. Extend `tools/source_policy.py` with positive and
   controlled-negative coverage when adding a boundary rule.
+
+- Per-operation cost metering is missing and needs building: Lucent `lucent::perf` scopes (`OperationMeter`) reporting the run-end lines of the re-harness `perf-units` skill.
